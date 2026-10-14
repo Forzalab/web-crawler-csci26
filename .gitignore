@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Build outputs
+a.out
+*.o
+*.obj
+*.out
+*.exe
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+
+# Test runner temp file
+THIS_IS_YOUR_OUTPUT
+
+# Vercel / Node
+.vercel/
+node_modules/
