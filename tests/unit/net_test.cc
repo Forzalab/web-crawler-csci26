@@ -391,6 +391,27 @@ static void test_polite_fetch() {
     CHECK_EQ(f.label_of("http://js.com/"), std::string("JS_SHELL"));
     CHECK_EQ(f.label_of("http://never.com/"), std::string(""));
 
+    // Redirects: every hop must pass the target's robots.txt (other host or same host).
+    add("https://a.com/robots.txt", 404, {});
+    add("https://a.com/go", 301, {{"location", "https://b.com/private"}});
+    add("https://b.com/robots.txt", 200, {{"content-type", "text/plain"}}, "User-agent: *\nDisallow: /private\n");
+    add("https://a.com/self", 302, {{"location", "/hidden"}});
+    add("https://c.com/robots.txt", 200, {{"content-type", "text/plain"}}, "User-agent: *\nDisallow: /hidden\n");
+    add("https://c.com/self", 302, {{"location", "/hidden"}});
+    add("http://rr.com/robots.txt", 301, {{"location", "/robots-new"}});  // robots.txt itself redirects
+    add("http://rr.com/robots-new", 200, {{"content-type", "text/plain"}}, "User-agent: *\nDisallow: /x\n");
+    add("http://rr.com/y", 200, html, "<a href=/x>");
+    log.clear();
+    CHECK_EQ(f.links("https://a.com/go").has_value(), false);
+    CHECK_EQ(f.label_of("https://a.com/go"), std::string("ROBOTS"));
+    CHECK_EQ(f.last().final_url, std::string("https://b.com/private"));
+    CHECK_EQ(join(log), std::string("https://a.com/robots.txt\nhttps://a.com/go\nhttps://b.com/robots.txt\n"));  // b.com/private never requested
+    CHECK_EQ(f.links("https://c.com/self").has_value(), false);  // same-host hop into a disallowed path
+    CHECK_EQ(f.label_of("https://c.com/self"), std::string("ROBOTS"));
+    CHECK_EQ(f.links("http://rr.com/y").has_value(), true);      // no recursion; redirected robots.txt is used
+    CHECK_EQ(f.links("http://rr.com/x").has_value(), false);
+    CHECK_EQ(f.label_of("http://rr.com/x"), std::string("ROBOTS"));
+
     FetchResult r;
     r.error = "timeout: read";
     CHECK_EQ(status_label(r), std::string("TIMEOUT"));

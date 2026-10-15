@@ -1,7 +1,8 @@
 // https_fetcher.h - our own fetch path (TLS owner = Claude, decision 19:04).
 // Fetches http:// and https://, follows redirects (301/302/303/307/308, max 5),
 // keeps only 2xx HTML, returns its <a href> links. Implements LinkSource.
-// Polite by default: robots.txt (RFC 9309, per origin, once per run), 429 /
+// Polite by default: robots.txt (RFC 9309, per origin, once per run; checked
+// again on every redirect hop), 429 /
 // 503 Retry-After retries, per-host pacing after a 429 or a Crawl-delay.
 #pragma once
 

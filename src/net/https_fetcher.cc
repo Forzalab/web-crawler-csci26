@@ -112,6 +112,7 @@ FetchResult HttpsFetcher::fetch_live(const std::string& url) {
         r.error = "bad_url: " + url;
         return r;
     }
+    const bool robots_txt = u->path == "/robots.txt";  // its own redirects skip robots (no recursion)
     int retries = 0;
     bool waited = false;  // just slept a Retry-After: skip the host pacing once
     while (true) {
@@ -154,8 +155,14 @@ FetchResult HttpsFetcher::fetch_live(const std::string& url) {
             r.error = "redirects: bad or missing Location";
             return r;
         }
-        u = next;
         ++r.redirects;
+        if (robots_on_ && !robots_txt)  // redirect target (maybe another host) must pass its own robots.txt
+            if (auto blocked = robots_block(url, *next)) {
+                r.final_url = blocked->final_url;
+                r.error = blocked->error;
+                return r;
+            }
+        u = next;
     }
     if (r.status < 200 || r.status > 299) r.error = "http: " + std::to_string(r.status);
     return r;
