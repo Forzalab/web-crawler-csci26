@@ -28,10 +28,23 @@ Input: `MODE START MAXDEPTH MAXSIZE`, then `P`, then P lines `url k link1 .. lin
 (`k = -1` means the fetch fails; a url that is not listed also fails).
 Output: `MODE`, `FETCH`, `NODE` and `EDGE` lines, then the `NODES` / `EDGES` / `FETCHES` / `FAILED` / `SLEEPS` counts.
 
+## Real fetch (smoke test)
+
+```sh
+./build/wc --links https://en.wikipedia.org/wiki/Wars_of_the_Roses   # links on stdout
+./build/wc --links http://wowcubedocs.com/                           # 308 -> https, followed
+```
+
+stderr shows `[fetch] via=tls status=... redirects=... final=... error=...`.
+`https://` always goes to our fetcher (`src/net/`); `http://` goes to Josh's adapter first and falls back to ours if it fails.
+Needs OpenSSL dev headers for https (`apt install libssl-dev`); without them it still builds and https fetches fail with `tls: built without OpenSSL`.
+Certificates are verified against the system CA store (`SSL_CERT_FILE=...` points OpenSSL at another bundle).
+
 ## Tests
 
 ```sh
-make test       # or: tests/run.sh [build/wc] [tests/crawl] [timeout_s]
+make unit       # build/wc_net_test: URL / link / HTTP / redirect / routing checks, no network
+make test       # unit, then the ladder: tests/run.sh [build/wc] [tests/crawl] [timeout_s]
 ```
 
 Same rules as Kerney's `input_tester`: `wc < inputfileN`, `diff -w` against `outputfileN`
@@ -44,11 +57,13 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 src/core/       graph, LinkSource, Renderer, Sleeper, crawl()   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/adapters/   JoshFetcher, LoganRenderer: teammate code is wired here only (// WIRE:)
+src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
-src/ui/         pipe_main (tests), tui_main (FTXUI)
+src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)
 tests/crawl/    ladder: inputfileN / outputfileN
 tests/run.sh    test runner
+tests/unit/     unit tests (wc_net_test)
 third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 ```
 

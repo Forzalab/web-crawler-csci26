@@ -21,6 +21,9 @@ jobs:
       - name: Build
         run: make
 
+      - name: Unit tests (src/net, no network)
+        run: build/wc_net_test
+
       - name: Crawl ladder (tests/run.sh)
         continue-on-error: true
         run: tests/run.sh build/wc tests/crawl | tee test-summary.txt

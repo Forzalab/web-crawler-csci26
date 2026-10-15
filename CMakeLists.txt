@@ -32,13 +32,38 @@ add_library(wc_core STATIC
 target_include_directories(wc_core PUBLIC src)
 target_compile_options(wc_core PRIVATE -Wall -Wextra)
 
+# --- wc_net: our fetch path, http + https + redirects (src/net/) ------------
+# OpenSSL is optional: without it the build still works and https:// fetches
+# fail with "tls: built without OpenSSL". Debian/Ubuntu: apt install libssl-dev.
+add_library(wc_net STATIC
+  src/net/url.cc
+  src/net/html_links.cc
+  src/net/http.cc
+  src/net/https_fetcher.cc
+)
+target_include_directories(wc_net PUBLIC src)
+target_compile_options(wc_net PRIVATE -Wall -Wextra)
+find_package(OpenSSL)
+if(OPENSSL_FOUND)
+  target_compile_definitions(wc_net PRIVATE WC_HAVE_OPENSSL)
+  target_link_libraries(wc_net PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+else()
+  message(WARNING "OpenSSL not found: https:// fetches will fail (install libssl-dev)")
+endif()
+
 # --- wc: the binary (pipe mode + TUI + teammate adapters) -------------------
 add_executable(wc
   src/main.cc
   src/ui/pipe_main.cc
   src/ui/tui_main.cc
+  src/ui/links_main.cc
   src/adapters/josh_fetcher.cc     # WIRE: #1 Josh
   src/adapters/logan_renderer.cc   # WIRE: #3 Logan
 )
-target_link_libraries(wc PRIVATE wc_core ftxui::component ftxui::dom ftxui::screen)
+target_link_libraries(wc PRIVATE wc_core wc_net ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)
+
+# --- unit tests (no network): tests/unit/ ------------------------------------
+add_executable(wc_net_test tests/unit/net_test.cc)
+target_link_libraries(wc_net_test PRIVATE wc_net wc_core)
+target_compile_options(wc_net_test PRIVATE -Wall -Wextra)
