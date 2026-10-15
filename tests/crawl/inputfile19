@@ -1,0 +1,7 @@
+DFS A 3 100
+5
+A 2 X B
+X 1 Y
+Y 1 B
+B 1 Z
+Z 0

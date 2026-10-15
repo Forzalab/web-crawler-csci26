@@ -1,0 +1,48 @@
+MODE BFS
+FETCH 0 0 home OK
+FETCH 1 1 about OK
+FETCH 2 1 blog OK
+FETCH 3 1 shop FAIL
+FETCH 4 2 team OK
+FETCH 5 2 post1 OK
+FETCH 6 2 post2 OK
+FETCH 7 2 ext.com FAIL
+FETCH 8 3 alice OK
+FETCH 9 3 bob OK
+FETCH 10 3 post3 OK
+NODE 0 0 home FETCHED
+NODE 1 1 about FETCHED
+NODE 2 1 blog FETCHED
+NODE 3 1 shop FAILED
+NODE 4 2 team FETCHED
+NODE 5 2 post1 FETCHED
+NODE 6 2 post2 FETCHED
+NODE 7 2 ext.com FAILED
+NODE 8 3 alice FETCHED
+NODE 9 3 bob FETCHED
+NODE 10 3 post3 FETCHED
+NODE 11 4 carol UNFETCHED
+EDGE home about NEW
+EDGE home blog NEW
+EDGE home shop NEW
+EDGE home home SEEN
+EDGE about team NEW
+EDGE about home SEEN
+EDGE blog post1 NEW
+EDGE blog post2 NEW
+EDGE blog ext.com NEW
+EDGE team alice NEW
+EDGE team bob NEW
+EDGE team about SEEN
+EDGE post1 post2 SEEN
+EDGE post1 blog SEEN
+EDGE post2 post3 NEW
+EDGE post2 about SEEN
+EDGE alice alice SEEN
+EDGE bob carol NEW
+EDGE bob home SEEN
+NODES 12
+EDGES 19
+FETCHES 11
+FAILED 2
+SLEEPS 10

@@ -1,0 +1,16 @@
+BFS home 4 12
+14
+home 4 about blog shop home
+about 2 team home
+team 3 alice bob about
+alice 1 alice
+bob 2 carol home
+carol 1 dave
+dave 0
+blog 4 post1 post2 post1 ext.com
+post1 2 post2 blog
+post2 2 post3 about
+post3 1 post4
+post4 0
+shop -1
+orphan 1 home

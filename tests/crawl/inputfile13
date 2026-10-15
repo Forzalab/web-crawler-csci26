@@ -1,0 +1,8 @@
+BFS A 3 20
+6
+A 1 B
+B 1 C
+C 1 D
+D 2 A E
+E 1 F
+F 0
