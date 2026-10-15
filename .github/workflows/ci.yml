@@ -21,6 +21,10 @@ jobs:
       - name: Build
         run: make
 
+      - name: BRIDGES JSON golden tests
+        continue-on-error: true
+        run: build/test_bridges_json tests/bridges/golden
+
       - name: Crawl ladder (tests/run.sh)
         continue-on-error: true
         run: tests/run.sh build/wc tests/crawl | tee test-summary.txt

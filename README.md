@@ -22,6 +22,7 @@ make clean
 ./build/wc < tests/crawl/inputfile9            # A3 report on stdout
 ./build/wc --stats --verbose < tests/crawl/inputfile9   # + telemetry on stderr
 ./build/wc --dot < tests/crawl/inputfile9 | dot -Tpng -o g.png
+./build/wc --bridges < tests/crawl/inputfile9          # BRIDGES graph JSON (no post)
 ```
 
 Input: `MODE START MAXDEPTH MAXSIZE`, then `P`, then P lines `url k link1 .. linkk`
@@ -32,6 +33,8 @@ Output: `MODE`, `FETCH`, `NODE` and `EDGE` lines, then the `NODES` / `EDGES` / `
 
 ```sh
 make test       # or: tests/run.sh [build/wc] [tests/crawl] [timeout_s]
+build/test_bridges_json tests/bridges/golden            # BRIDGES JSON golden files
+build/test_bridges_json tests/bridges/golden --update   # rewrite them after a format change
 ```
 
 Same rules as Kerney's `input_tester`: `wc < inputfileN`, `diff -w` against `outputfileN`
@@ -45,10 +48,12 @@ src/core/       graph, LinkSource, Renderer, Sleeper, crawl()   (no I/O, no deps
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/adapters/   JoshFetcher, LoganRenderer: teammate code is wired here only (// WIRE:)
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
+src/bridges/    bridges_json(): our own BRIDGES graph JSON writer (no bridges-cxx, no post)
 src/ui/         pipe_main (tests), tui_main (FTXUI)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)
 tests/crawl/    ladder: inputfileN / outputfileN
 tests/run.sh    test runner
+tests/bridges/  golden tests for bridges_json()
 third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 ```
 

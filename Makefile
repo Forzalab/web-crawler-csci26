@@ -8,6 +8,7 @@ all:
 	cmake --build $(BUILD) -j
 
 test: all
+	$(BUILD)/test_bridges_json tests/bridges/golden
 	tests/run.sh $(BUILD)/wc tests/crawl
 
 clean:
