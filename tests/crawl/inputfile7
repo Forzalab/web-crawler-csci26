@@ -1,0 +1,5 @@
+BFS A 5 10
+3
+A 4 B C B C
+B 3 C C C
+C 0

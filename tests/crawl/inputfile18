@@ -1,0 +1,6 @@
+DFS A 5 10
+4
+A 2 B C
+B 2 C D
+C 1 D
+D 0

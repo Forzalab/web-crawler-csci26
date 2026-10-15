@@ -1,0 +1,6 @@
+BFS A 5 10
+4
+A 1 B
+B 0
+Q 2 R A
+R 1 B

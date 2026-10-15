@@ -1,0 +1,47 @@
+MODE DFS
+FETCH 0 0 home OK
+FETCH 1 1 about OK
+FETCH 2 2 team OK
+FETCH 3 3 alice OK
+FETCH 4 3 bob OK
+FETCH 5 1 blog OK
+FETCH 6 2 post1 OK
+FETCH 7 3 post2 OK
+FETCH 8 2 ext.com FAIL
+FETCH 9 1 shop FAIL
+NODE 0 0 home FETCHED
+NODE 1 1 about FETCHED
+NODE 2 2 team FETCHED
+NODE 3 3 alice FETCHED
+NODE 4 3 bob FETCHED
+NODE 5 4 carol UNFETCHED
+NODE 6 1 blog FETCHED
+NODE 7 2 post1 FETCHED
+NODE 8 2 post2 FETCHED
+NODE 9 3 post3 UNFETCHED
+NODE 10 2 ext.com FAILED
+NODE 11 1 shop FAILED
+EDGE home about NEW
+EDGE about team NEW
+EDGE team alice NEW
+EDGE alice alice SEEN
+EDGE team bob NEW
+EDGE bob carol NEW
+EDGE bob home SEEN
+EDGE team about SEEN
+EDGE about home SEEN
+EDGE home blog NEW
+EDGE blog post1 NEW
+EDGE post1 post2 NEW
+EDGE post2 post3 NEW
+EDGE post2 about SEEN
+EDGE post1 blog SEEN
+EDGE blog post2 SEEN
+EDGE blog ext.com NEW
+EDGE home shop NEW
+EDGE home home SEEN
+NODES 12
+EDGES 19
+FETCHES 10
+FAILED 2
+SLEEPS 9

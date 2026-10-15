@@ -1,0 +1,9 @@
+BFS A 5 4
+7
+A 2 B C
+B 3 D E A
+C -1
+D 1 B
+E 0
+F 0
+G 0
