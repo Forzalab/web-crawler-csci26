@@ -23,8 +23,12 @@ struct FetchResult {
     std::string content_type;
     std::string body;
     std::string error;         // "" = OK HTML page. Else "<kind>: detail", kind = bad_url |
-                               // http | redirects | not_html | the HttpResponse kinds
+                               // http | redirects | not_html | offline | the HttpResponse kinds
+    std::string fetched_at;    // UTC ISO-8601, set when stored in / loaded from the cache
+    bool from_cache = false;
 };
+
+class PageCache;
 
 class HttpsFetcher : public LinkSource {
 public:
@@ -34,14 +38,22 @@ public:
     explicit HttpsFetcher(HttpOptions opt = {});  // real network (HttpClient)
     explicit HttpsFetcher(Transport t);           // tests: fake network
 
+    // Cache: hit -> no network. offline -> a miss fails with "offline: not cached".
+    // refresh -> always fetch live and overwrite. nullptr = no cache (default).
+    void use_cache(const PageCache* cache, bool offline = false, bool refresh = false);
+
     FetchResult fetch(const std::string& url);
     std::optional<std::vector<std::string>> links(const std::string& url) override;
     const FetchResult& last() const { return last_; }  // result of the latest links()
 
 private:
+    FetchResult fetch_live(const std::string& url);
+
     std::shared_ptr<HttpClient> client_;
     Transport get_;
     FetchResult last_;
+    const PageCache* cache_ = nullptr;
+    bool offline_ = false, refresh_ = false;
 };
 
 // https:// -> tls. http:// -> josh first; if Josh fails (or is not wired yet,

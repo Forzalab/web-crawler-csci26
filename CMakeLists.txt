@@ -40,6 +40,7 @@ add_library(wc_net STATIC
   src/net/html_links.cc
   src/net/http.cc
   src/net/https_fetcher.cc
+  src/net/cache.cc
 )
 target_include_directories(wc_net PUBLIC src)
 target_compile_options(wc_net PRIVATE -Wall -Wextra)

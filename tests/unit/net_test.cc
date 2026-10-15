@@ -1,10 +1,15 @@
 // net_test.cc - unit tests for src/net (URL resolve, link extraction, HTTP
 // parsing, redirects, routing). No network: the fetcher gets a fake transport.
 // Run: build/wc_net_test   (exit 1 if any check fails)
+#include <unistd.h>
+
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 
 #include "mocks/mock_fetcher.h"
+#include "net/cache.h"
 #include "net/html_links.h"
 #include "net/http.h"
 #include "net/https_fetcher.h"
@@ -178,6 +183,91 @@ static void test_router() {
     CHECK_EQ(r.links("http://none/").has_value(), false);
 }
 
+static void test_cache() {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("wc_net_test_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    PageCache cache(dir.string());
+
+    FetchResult ok;
+    ok.url = "http://a.com/";
+    ok.final_url = "https://a.com/";
+    ok.status = 200;
+    ok.redirects = 1;
+    ok.content_type = "text/html";
+    ok.body = std::string("<a href=x>\n\nline\0bin", 21);
+    cache.store(ok);
+    CHECK_EQ(ok.fetched_at.empty(), false);
+    auto hit = cache.load("http://a.com/");
+    CHECK_EQ(hit.has_value(), true);
+    if (hit) {
+        CHECK_EQ(hit->body, ok.body);
+        CHECK_EQ(hit->final_url, ok.final_url);
+        CHECK_EQ(hit->status, 200);
+        CHECK_EQ(hit->redirects, 1);
+        CHECK_EQ(hit->content_type, ok.content_type);
+        CHECK_EQ(hit->error, std::string(""));
+        CHECK_EQ(hit->fetched_at, ok.fetched_at);
+        CHECK_EQ(hit->from_cache, true);
+    }
+    CHECK_EQ(cache.load("http://other/").has_value(), false);
+
+    FetchResult nf = ok;
+    nf.url = "http://nf/";
+    nf.status = 404;
+    nf.error = "http: 404";
+    cache.store(nf);
+    hit = cache.load("http://nf/");
+    CHECK_EQ(hit ? hit->error + "|" + hit->body : std::string("<miss>"), std::string("http: 404|"));  // body dropped
+
+    FetchResult down;
+    down.url = "http://down/";
+    down.error = "timeout: read";
+    cache.store(down);
+    CHECK_EQ(cache.load("http://down/").has_value(), false);  // status 0 never stored
+
+    std::ofstream(cache.path_for("http://forged/")) << "WC-CACHE 1\nurl: http://else/\nstatus: 200\n\n";
+    CHECK_EQ(cache.load("http://forged/").has_value(), false);  // url mismatch = miss
+
+    int calls = 0;
+    bool net_up = true;
+    HttpsFetcher f([&](const Url&) {
+        ++calls;
+        HttpResponse r;
+        if (!net_up) {
+            r.error = "connect: down";
+            return r;
+        }
+        r.status = 200;
+        r.headers["content-type"] = "text/html";
+        r.body = "<a href=/p>";
+        return r;
+    });
+    f.use_cache(&cache);
+    auto l = f.links("http://site/");
+    CHECK_EQ(calls, 1);
+    CHECK_EQ(f.last().from_cache, false);
+    net_up = false;
+    l = f.links("http://site/");
+    CHECK_EQ(calls, 1);  // hit: no network
+    CHECK_EQ(f.last().from_cache, true);
+    CHECK_EQ(l ? join(*l) : std::string("<none>"), std::string("http://site/p\n"));
+
+    f.use_cache(&cache, /*offline=*/true);
+    CHECK_EQ(f.links("http://site/").has_value(), true);
+    CHECK_EQ(f.links("http://never/").has_value(), false);
+    CHECK_EQ(f.last().error, std::string("offline: not cached"));
+    CHECK_EQ(calls, 1);
+
+    net_up = true;
+    f.use_cache(&cache, false, /*refresh=*/true);
+    f.links("http://site/");
+    CHECK_EQ(calls, 2);  // refresh always goes live
+    CHECK_EQ(f.last().from_cache, false);
+
+    fs::remove_all(dir);
+}
+
 int main() {
     test_parse();
     test_resolve();
@@ -185,6 +275,7 @@ int main() {
     test_http_parse();
     test_fetcher();
     test_router();
+    test_cache();
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }

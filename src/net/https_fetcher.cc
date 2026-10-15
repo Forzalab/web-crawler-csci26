@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
+#include "net/cache.h"
 #include "net/html_links.h"
 
 namespace wc {
@@ -13,7 +14,27 @@ HttpsFetcher::HttpsFetcher(HttpOptions opt)
 
 HttpsFetcher::HttpsFetcher(Transport t) : get_(std::move(t)) {}
 
+void HttpsFetcher::use_cache(const PageCache* cache, bool offline, bool refresh) {
+    cache_ = cache;
+    offline_ = offline;
+    refresh_ = refresh;
+}
+
 FetchResult HttpsFetcher::fetch(const std::string& url) {
+    if (cache_ && !refresh_)
+        if (auto hit = cache_->load(url)) return *hit;
+    if (offline_) {
+        FetchResult r;
+        r.url = url;
+        r.error = "offline: not cached";
+        return r;
+    }
+    FetchResult r = fetch_live(url);
+    if (cache_) cache_->store(r);
+    return r;
+}
+
+FetchResult HttpsFetcher::fetch_live(const std::string& url) {
     FetchResult r;
     r.url = url;
     auto u = parse_url(url);

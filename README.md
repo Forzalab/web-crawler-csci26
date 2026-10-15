@@ -40,6 +40,17 @@ stderr shows `[fetch] via=tls status=... redirects=... final=... error=...`.
 Needs OpenSSL dev headers for https (`apt install libssl-dev`); without them it still builds and https fetches fail with `tls: built without OpenSSL`.
 Certificates are verified against the system CA store (`SSL_CERT_FILE=...` points OpenSSL at another bundle).
 
+Every fetch is cached on disk (`.wc-cache/`, gitignored), so reruns stay off live sites and report crawls replay exactly:
+
+```sh
+./build/wc --links URL --offline     # cache only, never the network ("offline: not cached" on a miss)
+./build/wc --links URL --refresh     # fetch live and overwrite the cached copy
+./build/wc --links URL --cache DIR   # other cache dir;  --no-cache = off
+```
+
+One file per URL: a short text header (status, final URL, error, fetched_at) then the HTML body (format in `src/net/cache.h`).
+Network failures (DNS, connect, timeout) are not cached, so the next run retries them.
+
 ## Tests
 
 ```sh
@@ -57,7 +68,7 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 src/core/       graph, LinkSource, Renderer, Sleeper, crawl()   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/adapters/   JoshFetcher, LoganRenderer: teammate code is wired here only (// WIRE:)
-src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher
+src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
 src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)
