@@ -61,8 +61,10 @@ add_executable(wc
   src/ui/pipe_main.cc
   src/ui/tui_main.cc
   src/ui/links_main.cc
-  src/adapters/josh_fetcher.cc     # WIRE: #1 Josh
-  src/adapters/logan_renderer.cc   # WIRE: #3 Logan
+  src/adapters/josh_fetcher.cc
+  src/adapters/logan_renderer.cc
+  src/team/josh.cc                 # #1 Josh writes here
+  src/team/logan.cc                # #3 Logan writes here
 )
 target_link_libraries(wc PRIVATE wc_core wc_net ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)

@@ -75,7 +75,8 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 ```
 src/core/       graph, LinkSource, Renderer, Sleeper, crawl()   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
-src/adapters/   JoshFetcher, LoganRenderer: teammate code is wired here only (// WIRE:)
+src/team/       josh.cc, logan.cc: Josh and Logan write their parts here (plain C++)
+src/adapters/   JoshFetcher, LoganRenderer: glue from src/team/ to the crawler (teammates never edit)
 src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
 src/bridges/    bridges_json(): our own BRIDGES graph JSON writer (no bridges-cxx, no post)
@@ -92,10 +93,10 @@ third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 
 | Part | Owner | Where it plugs in |
 |---|---|---|
-| #1 fetch a page, return its URLs | Josh | `src/adapters/josh_fetcher.cc` (`// WIRE:`) |
+| #1 fetch a page, return its URLs | Josh | `src/team/josh.cc`: `josh_get_links(url)` |
 | #2 graph traversal, BFS + DFS | Tony | `src/core/crawl.cc` |
-| #3 BRIDGES rendering | Logan | `src/adapters/logan_renderer.cc` (`// WIRE:`) |
+| #3 BRIDGES rendering | Logan | `src/team/logan.cc`: `logan_draw(nodes, edges)` |
 
-Each teammate's own function signature goes only inside their adapter, next to a `// WIRE:` comment. The rest of the code only sees `LinkSource` and `Renderer`.
+Josh and Logan each fill in one function in `src/team/`, using plain `vector`, `string` and small structs. The `.h` files there say exactly what goes in and what comes out. The glue in `src/adapters/` turns those into the crawler's types, so nobody else's code needs to change.
 
 Secrets: copy `.env.example` to `.env` (gitignored). Never commit keys.

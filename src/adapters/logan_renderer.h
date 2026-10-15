@@ -1,6 +1,5 @@
-// logan_renderer.h - adapter for part #3 (Logan: draw the graph on BRIDGES).
-// Logan's own signature and any bridges headers may only appear in
-// logan_renderer.cc next to `// WIRE:`.
+// logan_renderer.h - plugs Logan's logan_draw() (src/team/logan.h) into the crawler.
+// Teammates never need to open this file.
 #pragma once
 
 #include "core/renderer.h"

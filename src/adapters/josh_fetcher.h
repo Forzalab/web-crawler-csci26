@@ -1,5 +1,5 @@
-// josh_fetcher.h - adapter for part #1 (Josh: fetch a page, return its URLs).
-// Josh's own signature may only appear in josh_fetcher.cc next to `// WIRE:`.
+// josh_fetcher.h - plugs Josh's josh_get_links() (src/team/josh.h) into the crawler.
+// Teammates never need to open this file.
 #pragma once
 
 #include "core/link_source.h"
