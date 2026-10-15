@@ -1,0 +1,33 @@
+# Job A: build + crawl ladder. Informational only: it never blocks a merge
+# (test step is continue-on-error; do not mark this check as required).
+# No network in tests, no secrets.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make
+
+      - name: Crawl ladder (tests/run.sh)
+        continue-on-error: true
+        run: tests/run.sh build/wc tests/crawl | tee test-summary.txt
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-summary
+          path: test-summary.txt
