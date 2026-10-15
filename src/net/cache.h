@@ -14,7 +14,7 @@
 //   fetched_at: 2026-10-15T05:00:00Z
 //   bytes: <N>
 //   <blank line, then exactly N body bytes>
-// Body is kept only for OK pages. Transport failures (status 0) are not stored.
+// Body is kept only for OK HTML / text/plain (robots.txt) pages. Transport failures (status 0) are not stored.
 #pragma once
 
 #include <optional>

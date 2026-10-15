@@ -41,8 +41,10 @@ add_library(wc_net STATIC
   src/net/http.cc
   src/net/https_fetcher.cc
   src/net/cache.cc
+  src/net/robots.cc
 )
 target_include_directories(wc_net PUBLIC src)
+target_link_libraries(wc_net PUBLIC wc_core)  # Sleeper
 target_compile_options(wc_net PRIVATE -Wall -Wextra)
 find_package(OpenSSL)
 if(OPENSSL_FOUND)

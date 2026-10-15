@@ -1,5 +1,6 @@
 #include "net/cache.h"
 
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -83,7 +84,10 @@ void PageCache::store(FetchResult& r) const {
     if (r.fetched_at.empty()) r.fetched_at = now_utc();
     std::error_code ec;
     std::filesystem::create_directories(dir_, ec);
-    const std::string& body = r.error.empty() ? r.body : std::string();
+    std::string ct;
+    for (char c : r.content_type) ct += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    bool keep = r.error.empty() && (ct.empty() || ct.find("html") != std::string::npos || ct.find("text/plain") != std::string::npos);
+    const std::string& body = keep ? r.body : std::string();
     std::string path = path_for(r.url), tmp = path + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);

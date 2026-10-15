@@ -1,16 +1,21 @@
 // https_fetcher.h - our own fetch path (TLS owner = Claude, decision 19:04).
 // Fetches http:// and https://, follows redirects (301/302/303/307/308, max 5),
 // keeps only 2xx HTML, returns its <a href> links. Implements LinkSource.
+// Polite by default: robots.txt (RFC 9309, per origin, once per run), 429 /
+// 503 Retry-After retries, per-host pacing after a 429 or a Crawl-delay.
 #pragma once
 
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "core/link_source.h"
+#include "core/sleeper.h"
 #include "net/http.h"
+#include "net/robots.h"
 #include "net/url.h"
 
 namespace wc {
@@ -22,11 +27,16 @@ struct FetchResult {
     int redirects = 0;
     std::string content_type;
     std::string body;
-    std::string error;         // "" = OK HTML page. Else "<kind>: detail", kind = bad_url |
-                               // http | redirects | not_html | offline | the HttpResponse kinds
+    std::string error;         // "" = OK page. Else "<kind>: detail", kind = bad_url | http |
+                               // redirects | not_html | offline | robots | the HttpResponse kinds
     std::string fetched_at;    // UTC ISO-8601, set when stored in / loaded from the cache
     bool from_cache = false;
 };
+
+// Short status for TUI / report / BRIDGES: OK, ROBOTS, HTTP_404, TLS, TIMEOUT, DNS,
+// CONNECT, IO, TOO_LARGE, BAD_RESPONSE, REDIRECTS, NOT_HTML, BAD_URL, OFFLINE, or
+// JS_SHELL (OK page with `links` == 0 that mentions JavaScript: probably needs a browser).
+std::string status_label(const FetchResult& r, long links = -1);
 
 class PageCache;
 
@@ -34,26 +44,43 @@ class HttpsFetcher : public LinkSource {
 public:
     using Transport = std::function<HttpResponse(const Url&)>;
     static constexpr int kMaxRedirects = 5;
+    static constexpr int kMaxRetries = 2;         // per request, on 429 or 503 + Retry-After
+    static constexpr int kMaxWaitMs = 30000;      // one Retry-After wait, capped
+    static constexpr int kMaxHostDelayMs = 5000;  // per-host pacing (after a 429 / Crawl-delay), capped
 
     explicit HttpsFetcher(HttpOptions opt = {});  // real network (HttpClient)
     explicit HttpsFetcher(Transport t);           // tests: fake network
+    HttpsFetcher(const HttpsFetcher&) = delete;
+    HttpsFetcher& operator=(const HttpsFetcher&) = delete;
 
     // Cache: hit -> no network. offline -> a miss fails with "offline: not cached".
     // refresh -> always fetch live and overwrite. nullptr = no cache (default).
     void use_cache(const PageCache* cache, bool offline = false, bool refresh = false);
+    void use_robots(bool on) { robots_on_ = on; }  // default on
+    void use_sleeper(Sleeper* s) { sleeper_ = s; }  // default RealSleeper (tests: fake)
 
-    FetchResult fetch(const std::string& url);
+    // html = false: any 2xx content type is OK (robots.txt).
+    FetchResult fetch(const std::string& url, bool html = true);
     std::optional<std::vector<std::string>> links(const std::string& url) override;
     const FetchResult& last() const { return last_; }  // result of the latest links()
+    std::string label_of(const std::string& url) const;  // status_label of links(url); "" = never asked
 
 private:
+    FetchResult fetch_raw(const std::string& url);
     FetchResult fetch_live(const std::string& url);
+    std::optional<FetchResult> robots_block(const std::string& url, const Url& u);
+    void slow_host(const std::string& host, int ms);
 
     std::shared_ptr<HttpClient> client_;
     Transport get_;
     FetchResult last_;
     const PageCache* cache_ = nullptr;
-    bool offline_ = false, refresh_ = false;
+    bool offline_ = false, refresh_ = false, robots_on_ = true;
+    RealSleeper real_sleeper_;
+    Sleeper* sleeper_ = &real_sleeper_;
+    std::unordered_map<std::string, RobotsRules> robots_;  // origin -> rules, this run
+    std::unordered_map<std::string, int> host_delay_ms_;  // host -> sleep before each request
+    std::unordered_map<std::string, std::string> labels_;  // asked url -> status_label
 };
 
 // https:// -> tls. http:// -> josh first; if Josh fails (or is not wired yet,

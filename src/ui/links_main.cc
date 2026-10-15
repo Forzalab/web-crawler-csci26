@@ -1,6 +1,7 @@
 // links_main.cc - `wc --links URL`: one real fetch, links on stdout, status on
 // stderr. Smoke test for the fetch path (Josh adapter + our TLS fetcher).
 // Cache flags: --cache DIR (default .wc-cache), --no-cache, --offline, --refresh.
+// --no-robots skips robots.txt (on by default).
 #include <cstring>
 #include <iostream>
 
@@ -14,7 +15,7 @@ namespace wc {
 int links_main(int argc, char** argv) {
     const char* url = nullptr;
     std::string cache_dir = ".wc-cache";
-    bool use_cache = true, offline = false, refresh = false;
+    bool use_cache = true, offline = false, refresh = false, robots = true;
     for (int i = 1; i < argc; ++i) {
         bool has_arg = i + 1 < argc;
         if (!std::strcmp(argv[i], "--links") && has_arg) url = argv[++i];
@@ -22,22 +23,24 @@ int links_main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--no-cache")) use_cache = false;
         else if (!std::strcmp(argv[i], "--offline")) offline = true;
         else if (!std::strcmp(argv[i], "--refresh")) refresh = true;
+        else if (!std::strcmp(argv[i], "--no-robots")) robots = false;
     }
     if (!url || (offline && !use_cache)) {
-        std::cerr << "usage: wc --links URL [--cache DIR | --no-cache] [--offline] [--refresh]\n";
+        std::cerr << "usage: wc --links URL [--cache DIR | --no-cache] [--offline] [--refresh] [--no-robots]\n";
         return 2;
     }
     JoshFetcher josh;
     HttpsFetcher tls;
     PageCache cache(cache_dir);
     if (use_cache) tls.use_cache(&cache, offline, refresh);
+    tls.use_robots(robots);
     RoutedFetcher routed(josh, tls);
     LinkSource& src = offline ? static_cast<LinkSource&>(tls) : routed;  // offline: never touch Josh's network
     auto links = src.links(url);
 
     const FetchResult& r = tls.last();
     if (r.url == url)
-        std::cerr << "[fetch] via=tls status=" << r.status << " redirects=" << r.redirects << " final=" << r.final_url
+        std::cerr << "[fetch] via=tls label=" << tls.label_of(url) << " status=" << r.status << " redirects=" << r.redirects << " final=" << r.final_url
                   << " type=" << r.content_type << " bytes=" << r.body.size()
                   << " cache=" << (!use_cache ? "off" : r.from_cache ? "hit" : "miss")
                   << (r.error.empty() ? "" : " error=" + r.error) << '\n';

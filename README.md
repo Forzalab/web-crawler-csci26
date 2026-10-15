@@ -51,6 +51,11 @@ Every fetch is cached on disk (`.wc-cache/`, gitignored), so reruns stay off liv
 One file per URL: a short text header (status, final URL, error, fetched_at) then the HTML body (format in `src/net/cache.h`).
 Network failures (DNS, connect, timeout) are not cached, so the next run retries them.
 
+Polite by default:
+- **robots.txt** is read once per site (RFC 9309: our `CSCI26-WebCrawler` group, else `*`). A disallowed page is never requested and gets the label `ROBOTS`. robots.txt 4xx = allow all; 5xx = disallow all. `--no-robots` turns this off.
+- **429 / 503 + Retry-After**: wait (header value, else 1 s then 2 s, max 30 s) and retry up to 2 times. After that the host stays paced (max 5 s before each request). A `Crawl-delay:` in robots.txt paces the same way.
+- **Status label** per page (`label=` on stderr): `OK`, `ROBOTS`, `HTTP_404`, `TLS`, `TIMEOUT`, `DNS`, `CONNECT`, `REDIRECTS`, `NOT_HTML`, `OFFLINE`, `JS_SHELL` (page loaded but has no links and mentions JavaScript), ... (`status_label()` in `src/net/https_fetcher.h`).
+
 ## Tests
 
 ```sh
@@ -68,7 +73,7 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 src/core/       graph, LinkSource, Renderer, Sleeper, crawl()   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/adapters/   JoshFetcher, LoganRenderer: teammate code is wired here only (// WIRE:)
-src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache
+src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
 src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)

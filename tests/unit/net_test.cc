@@ -11,6 +11,7 @@
 #include "mocks/mock_fetcher.h"
 #include "net/cache.h"
 #include "net/html_links.h"
+#include "net/robots.h"
 #include "net/http.h"
 #include "net/https_fetcher.h"
 #include "net/url.h"
@@ -142,6 +143,7 @@ static void test_fetcher() {
         r.error = "dns: unknown host";
         return r;
     });
+    f.use_robots(false);
 
     auto l = f.links("http://a.com/");
     CHECK_EQ(l.has_value(), true);
@@ -243,6 +245,7 @@ static void test_cache() {
         r.body = "<a href=/p>";
         return r;
     });
+    f.use_robots(false);
     f.use_cache(&cache);
     auto l = f.links("http://site/");
     CHECK_EQ(calls, 1);
@@ -268,6 +271,138 @@ static void test_cache() {
     fs::remove_all(dir);
 }
 
+struct RecordingSleeper : Sleeper {
+    std::vector<int> ms;
+    void sleep_ms(int t) override { ms.push_back(t); }
+};
+
+static std::string ints(const std::vector<int>& v) {
+    std::string s;
+    for (int x : v) s += std::to_string(x) + " ";
+    return s;
+}
+
+static void test_robots_parse() {
+    RobotsRules r = parse_robots(
+        "Disallow: /before-any-agent\n"
+        "User-agent: *\n"
+        "Disallow: /private   # comment\n"
+        "Allow: /private/ok\n"
+        "Disallow: /*.pdf$\n"
+        "disallow: /search\n"
+        "Disallow: /*/edit\n"
+        "Allow: /tie\n"
+        "Disallow: /tie\n"
+        "Crawl-delay: 2\n"
+        "\n"
+        "User-agent: Googlebot\n"
+        "Disallow: /\n");
+    CHECK_EQ(r.allowed("/"), true);
+    CHECK_EQ(r.allowed("/before-any-agent"), true);
+    CHECK_EQ(r.allowed("/private/x"), false);
+    CHECK_EQ(r.allowed("/private/ok/1"), true);  // longer Allow wins
+    CHECK_EQ(r.allowed("/doc.pdf"), false);
+    CHECK_EQ(r.allowed("/doc.pdf?x=1"), true);   // '$' anchors the end
+    CHECK_EQ(r.allowed("/search?q=a"), false);
+    CHECK_EQ(r.allowed("/searching"), false);    // plain prefix match
+    CHECK_EQ(r.allowed("/a/b/edit"), false);
+    CHECK_EQ(r.allowed("/edit"), true);
+    CHECK_EQ(r.allowed("/tie"), true);           // same length: Allow wins
+    CHECK_EQ(r.crawl_delay_ms, 2000);
+
+    r = parse_robots("User-agent: *\nDisallow: /\n\nUser-agent: CSCI26-WebCrawler/0.1\nDisallow:\n");
+    CHECK_EQ(r.allowed("/x"), true);             // our own (empty) group beats "*"
+    r = parse_robots("User-agent: a\nUser-agent: *\nDisallow: /x\nUser-agent: b\nDisallow: /y\n");
+    CHECK_EQ(r.allowed("/x/1"), false);          // grouped agents share rules
+    CHECK_EQ(r.allowed("/y"), true);
+    CHECK_EQ(parse_robots("").allowed("/anything"), true);
+    RobotsRules all;
+    all.block_all = true;
+    CHECK_EQ(all.allowed("/"), false);
+}
+
+static void test_polite_fetch() {
+    std::map<std::string, std::vector<HttpResponse>> web;  // url -> responses, last one repeats
+    auto add = [&](const std::string& url, int status, std::map<std::string, std::string> h, std::string body = "") {
+        web[url].push_back(resp(status, std::move(h), std::move(body)));
+    };
+    const std::map<std::string, std::string> html = {{"content-type", "text/html"}};
+    add("https://r.com/robots.txt", 200, {{"content-type", "text/plain"}}, "User-agent: *\nDisallow: /no\nCrawl-delay: 1\n");
+    add("https://r.com/yes", 200, html, "<a href=/no>");
+    add("http://n.com/robots.txt", 404, html);
+    add("http://n.com/", 200, html, "<a href=/a>");
+    add("http://five.com/robots.txt", 503, {});
+    add("http://busy.com/robots.txt", 404, {});
+    add("http://busy.com/", 429, {{"retry-after", "3"}});
+    add("http://busy.com/", 200, html, "<a href=/b>");
+    add("http://jam.com/robots.txt", 404, {});
+    add("http://jam.com/", 429, {});
+    add("http://down.com/robots.txt", 503, {});  // never reached
+    add("http://js.com/robots.txt", 404, {});
+    add("http://js.com/", 200, html, "<noscript>Please enable JavaScript.</noscript>");
+    add("http://five.com/x", 200, html);
+
+    std::vector<std::string> log;
+    std::map<std::string, size_t> served;
+    HttpsFetcher f([&](const Url& u) {
+        std::string k = u.str();
+        log.push_back(k);
+        if (k.rfind("http://down.com", 0) == 0) {
+            HttpResponse r;
+            r.error = "dns: unknown host";
+            return r;
+        }
+        auto it = web.find(k);
+        if (it == web.end()) return resp(404, {});
+        size_t i = std::min(served[k]++, it->second.size() - 1);
+        return it->second[i];
+    });
+    RecordingSleeper sl;
+    f.use_sleeper(&sl);
+
+    CHECK_EQ(f.links("https://r.com/no").has_value(), false);
+    CHECK_EQ(f.label_of("https://r.com/no"), std::string("ROBOTS"));
+    CHECK_EQ(f.last().error, std::string("robots: disallowed by robots.txt"));
+    CHECK_EQ(join(log), std::string("https://r.com/robots.txt\n"));  // the page itself never requested
+    CHECK_EQ(f.links("https://r.com/yes").has_value(), true);
+    CHECK_EQ(log.size(), size_t(2));                 // robots.txt fetched once per origin
+    CHECK_EQ(ints(sl.ms), std::string("1000 "));     // Crawl-delay paces later r.com requests
+
+    sl.ms.clear();
+    CHECK_EQ(f.links("http://n.com/").has_value(), true);  // robots 404 = allow all
+    CHECK_EQ(f.label_of("http://n.com/"), std::string("OK"));
+    CHECK_EQ(f.links("http://five.com/x").has_value(), false);  // robots 5xx = disallow all
+    CHECK_EQ(f.last().error, std::string("robots: robots.txt unreachable"));
+    CHECK_EQ(f.links("http://down.com/").has_value(), false);  // robots dns error = page's own error
+    CHECK_EQ(f.label_of("http://down.com/"), std::string("DNS"));
+    CHECK_EQ(ints(sl.ms), std::string(""));
+
+    CHECK_EQ(f.links("http://busy.com/").has_value(), true);  // 429 + Retry-After: 3 -> wait, retry
+    CHECK_EQ(ints(sl.ms), std::string("3000 "));
+    f.links("http://busy.com/again");
+    CHECK_EQ(ints(sl.ms), std::string("3000 3000 "));  // host stays paced after a 429
+
+    sl.ms.clear();
+    CHECK_EQ(f.links("http://jam.com/").has_value(), false);  // 429 forever: 2 retries then give up
+    CHECK_EQ(f.label_of("http://jam.com/"), std::string("HTTP_429"));
+    CHECK_EQ(ints(sl.ms), std::string("1000 2000 "));
+
+    CHECK_EQ(f.links("http://js.com/").has_value(), true);
+    CHECK_EQ(f.label_of("http://js.com/"), std::string("JS_SHELL"));
+    CHECK_EQ(f.label_of("http://never.com/"), std::string(""));
+
+    FetchResult r;
+    r.error = "timeout: read";
+    CHECK_EQ(status_label(r), std::string("TIMEOUT"));
+    r.error = "not_html: image/png";
+    CHECK_EQ(status_label(r), std::string("NOT_HTML"));
+    r.error = "http: 503";
+    r.status = 503;
+    CHECK_EQ(status_label(r), std::string("HTTP_503"));
+    r.error = "offline: not cached";
+    CHECK_EQ(status_label(r), std::string("OFFLINE"));
+}
+
 int main() {
     test_parse();
     test_resolve();
@@ -276,6 +411,8 @@ int main() {
     test_fetcher();
     test_router();
     test_cache();
+    test_robots_parse();
+    test_polite_fetch();
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }
