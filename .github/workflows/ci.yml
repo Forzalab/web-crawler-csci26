@@ -43,6 +43,11 @@ jobs:
         continue-on-error: true
         run: build/test_bridges_json tests/bridges/golden
 
+      # Gateway (PR #6): node:test, no deps, no network (fake BRIDGES on 127.0.0.1).
+      - name: Gateway tests
+        working-directory: gateway
+        run: npm test
+
       - name: Crawl ladder (tests/run.sh)
         continue-on-error: true
         run: tests/run.sh build/wc tests/crawl | tee test-summary.txt
