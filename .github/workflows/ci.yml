@@ -18,8 +18,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # libssl-dev = https in src/net (PR #3). The runner image has it today;
+      # installing it here keeps that true if the image changes.
+      # No libcurl: we never link bridges-cxx (the gateway posts to BRIDGES).
+      - name: Install deps
+        continue-on-error: true   # apt hiccup must not block; the check below warns
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libssl-dev
+
       - name: Build
         run: make
+
+      # CMake only warns when OpenSSL is missing. Surface it as an annotation
+      # (non-blocking) so a TLS-less build never looks green by accident.
+      - name: Check https support
+        run: |
+          grep -q WC_HAVE_OPENSSL build/compile_commands.json \
+            && echo "OpenSSL: yes" \
+            || echo "::warning::built WITHOUT OpenSSL: https fetches will fail"
 
       - name: Unit tests (src/net, no network)
         run: build/wc_net_test
