@@ -28,6 +28,7 @@ add_library(wc_core STATIC
   src/core/crawl.cc          # Tony's #2
   src/mocks/mock_fetcher.cc
   src/mocks/mock_renderer.cc
+  src/bridges/bridges_json.cc # BRIDGES JSON (no post)
 )
 target_include_directories(wc_core PUBLIC src)
 target_compile_options(wc_core PRIVATE -Wall -Wextra)
@@ -70,3 +71,8 @@ target_compile_options(wc PRIVATE -Wall -Wextra)
 add_executable(wc_net_test tests/unit/net_test.cc)
 target_link_libraries(wc_net_test PRIVATE wc_net wc_core)
 target_compile_options(wc_net_test PRIVATE -Wall -Wextra)
+
+# --- test_bridges_json: golden tests for the BRIDGES JSON writer -----------
+add_executable(test_bridges_json tests/bridges/test_bridges_json.cc)
+target_link_libraries(test_bridges_json PRIVATE wc_core)
+target_compile_options(test_bridges_json PRIVATE -Wall -Wextra)

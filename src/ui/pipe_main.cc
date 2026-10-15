@@ -3,6 +3,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "bridges/bridges_json.h"
 #include "core/crawl.h"
 #include "mocks/mock_fetcher.h"
 #include "mocks/mock_renderer.h"
@@ -11,9 +12,10 @@
 namespace wc {
 
 int pipe_main(int argc, char** argv) {
-    bool dot = false, stats = false, verbose = false;
+    bool dot = false, bridges = false, stats = false, verbose = false;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--dot")) dot = true;
+        if (!std::strcmp(argv[i], "--bridges")) bridges = true;
         if (!std::strcmp(argv[i], "--stats")) stats = true;
         if (!std::strcmp(argv[i], "--verbose")) verbose = true;
     }
@@ -30,8 +32,12 @@ int pipe_main(int argc, char** argv) {
     NoSleeper sleeper;
     CrawlGraph g = crawl(input.start, input.cfg, fetcher, sleeper);
 
-    MockRenderer renderer(std::cout, dot ? MockRenderer::Fmt::Dot : MockRenderer::Fmt::Text, &sleeper);
-    renderer.render(g);
+    if (bridges) {
+        std::cout << bridges_json(g) << '\n';  // what the gateway would post
+    } else {
+        MockRenderer renderer(std::cout, dot ? MockRenderer::Fmt::Dot : MockRenderer::Fmt::Text, &sleeper);
+        renderer.render(g);
+    }
 
     if (stats)
         std::cerr << "[stats] fetch_calls=" << fetcher.call_log.size() << " misses=" << fetcher.misses

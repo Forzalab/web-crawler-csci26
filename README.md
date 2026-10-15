@@ -22,6 +22,7 @@ make clean
 ./build/wc < tests/crawl/inputfile9            # A3 report on stdout
 ./build/wc --stats --verbose < tests/crawl/inputfile9   # + telemetry on stderr
 ./build/wc --dot < tests/crawl/inputfile9 | dot -Tpng -o g.png
+./build/wc --bridges < tests/crawl/inputfile9          # BRIDGES graph JSON (no post)
 ```
 
 Input: `MODE START MAXDEPTH MAXSIZE`, then `P`, then P lines `url k link1 .. linkk`
@@ -59,8 +60,10 @@ Polite by default:
 ## Tests
 
 ```sh
-make unit       # build/wc_net_test: URL / link / HTTP / redirect / routing checks, no network
+make unit       # build/wc_net_test (URL / link / HTTP / redirect / routing, no network) + BRIDGES JSON golden tests
 make test       # unit, then the ladder: tests/run.sh [build/wc] [tests/crawl] [timeout_s]
+build/test_bridges_json tests/bridges/golden            # BRIDGES JSON golden files
+build/test_bridges_json tests/bridges/golden --update   # rewrite them after a format change
 ```
 
 Same rules as Kerney's `input_tester`: `wc < inputfileN`, `diff -w` against `outputfileN`
@@ -75,11 +78,13 @@ src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/adapters/   JoshFetcher, LoganRenderer: teammate code is wired here only (// WIRE:)
 src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
+src/bridges/    bridges_json(): our own BRIDGES graph JSON writer (no bridges-cxx, no post)
 src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)
 tests/crawl/    ladder: inputfileN / outputfileN
 tests/run.sh    test runner
 tests/unit/     unit tests (wc_net_test)
+tests/bridges/  golden tests for bridges_json()
 third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 ```
 

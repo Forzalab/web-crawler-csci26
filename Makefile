@@ -9,6 +9,7 @@ all:
 
 unit: all
 	$(BUILD)/wc_net_test
+	$(BUILD)/test_bridges_json tests/bridges/golden
 
 test: unit
 	tests/run.sh $(BUILD)/wc tests/crawl
