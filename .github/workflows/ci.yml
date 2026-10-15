@@ -21,6 +21,9 @@ jobs:
       - name: Build
         run: make
 
+      - name: Unit tests (src/net, no network)
+        run: build/wc_net_test
+
       - name: BRIDGES JSON golden tests
         continue-on-error: true
         run: build/test_bridges_json tests/bridges/golden

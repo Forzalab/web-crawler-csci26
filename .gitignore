@@ -22,6 +22,9 @@ compile_commands.json
 *.swp
 *~
 
+# Fetch cache (wc --cache DIR, default .wc-cache)
+.wc-cache/
+
 # Test runner temp file
 THIS_IS_YOUR_OUTPUT
 

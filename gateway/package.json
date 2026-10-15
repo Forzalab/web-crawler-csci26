@@ -1,0 +1,11 @@
+{
+  "name": "wc-bridges-gateway",
+  "private": true,
+  "type": "module",
+  "description": "POST graph JSON -> forward to BRIDGES with server-side creds -> return the BRIDGES URL",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
