@@ -65,14 +65,18 @@ else
         case "$stage" in
             configure) sc=$Y ;; compile) sc=$C ;; link) sc=$M ;; *) sc=$G ;;
         esac
-        fill=$((pct * 30 / 100))
+        # fit ONE terminal row: a wrapped line breaks \r and leaves a trail of old frames
+        cols=$(tput cols 2>/dev/null || echo 80)
+        w=$(( cols / 3 )); ((w > 30)) && w=30; ((w < 5)) && w=5
+        room=$(( cols - 27 - w )); ((room < 0)) && room=0
+        fill=$((pct * w / 100))
         bar=""
-        for ((k = 0; k < 30; k++)); do
+        for ((k = 0; k < w; k++)); do
             if ((k < fill)); then bar+=$full; else bar+=$empty; fi
         done
-        printf '\r\033[K %s%s%s %s%-9s%s %s%s%s %3d%% %s  %s%.40s%s' \
+        printf '\r\033[K %s%s%s %s%-9s%s %s%s%s %3d%% %s  %s%.*s%s' \
             "$C" "${spin[i % ${#spin[@]}]}" "$N" "$sc" "$stage" "$N" "$G" "$bar" "$N" \
-            "$pct" "${duck[(i / 4) % 2]}" "$D" "$what" "$N"
+            "$pct" "${duck[(i / 4) % 2]}" "$D" "$room" "$what" "$N"
         i=$((i + 1))
         sleep 0.1
     done
