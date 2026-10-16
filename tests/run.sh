@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# tests/run.sh [X [Y]] [binary=build/wc] [testdir=tests/crawl] [timeout_s=2]
+# tests/run.sh [bfs|dfs] [X [Y]] [binary=build/wc] [testdir=tests/crawl] [timeout_s=2]
 #   tests/run.sh          all tests
+#   tests/run.sh dfs      only crawl tests in DFS mode (bfs: BFS mode); input-error tests skipped
+#   tests/run.sh dfs 0 9  DFS tests among inputfile0 .. inputfile9
 #   tests/run.sh 3        only inputfile3
 #   tests/run.sh 0 5      inputfile0 .. inputfile5
 # Same rules as Kerney's input_tester: `binary < inputfileX`, stdout only,
@@ -9,6 +11,11 @@
 # Exit 1 if anything fails. If $GITHUB_STEP_SUMMARY is set, a table goes there.
 set -u
 num='^[0-9]+$'
+mode=""                                       # BFS / DFS filter, empty = every test
+case "${1:-}" in
+    bfs|BFS) mode=BFS; shift ;;
+    dfs|DFS) mode=DFS; shift ;;
+esac
 from=0 to=-1                                  # to = -1 -> run until the files run out
 if [[ ${1:-} =~ $num ]]; then
     from=$1 to=$1; shift
@@ -28,6 +35,12 @@ x=$from
 [ -e "$dir/inputfile$x" ] || { echo "no $dir/inputfile$x"; exit 2; }
 while [ -e "$dir/inputfile$x" ] && { [ "$to" -lt 0 ] || [ "$x" -le "$to" ]; }; do
     in="$dir/inputfile$x" want="$dir/outputfile$x"
+    if [ -n "$mode" ]; then                   # first word of the input = mode; ERROR tests never count
+        read -r first _ < "$in"
+        if [ "${first:-}" != "$mode" ] || grep -q '^ERROR' "$want" 2>/dev/null; then
+            x=$((x + 1)); continue
+        fi
+    fi
     timeout -s TERM "$limit" "$bin" < "$in" > "$tmp/out1" 2>/dev/null
     rc=$?
     timeout -s TERM "$limit" "$bin" < "$in" > "$tmp/out2" 2>/dev/null
@@ -67,7 +80,8 @@ done
     [ "$n" -ge "$x" ] 2>/dev/null && echo "WARNING: gap before inputfile$n (not run)"
 done
 
-summary="$pass passed, $fail failed, $((pass + fail)) total ($dir)"
+if [ $((pass + fail)) -eq 0 ]; then echo "no ${mode:-matching} tests in that range"; exit 2; fi
+summary="$pass passed, $fail failed, $((pass + fail)) total ($dir${mode:+, $mode only})"
 echo "SUMMARY: $summary"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     { echo "## crawl ladder: $summary"; echo; echo "| rung | result |"; echo "|---|---|"; printf '%s' "$rows"; } >> "$GITHUB_STEP_SUMMARY"
