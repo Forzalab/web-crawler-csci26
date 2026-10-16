@@ -105,13 +105,63 @@ CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
 }
 
 CrawlGraph& Crawler::crawl_bfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g) {
-    // on
+    
+    std::deque<std::string> todo;
+    std::unordered_map<std::string, bool> processed;
+    
+    std::string url = root_url;
+    todo.push_back(url);    
+    
+    while (!todo.empty() && cfg.__depth < cfg.maxDepth && cfg.__size <= cfg.maxSize) {
+        // ---- processing section ----
+        cfg.__depth++; // one iteration is ONE DEPTH.        
+        todo.pop_front();
+        
+        auto children = src.links(url);
+
+        if (url != root_url)
+            sleeper.sleep_ms(cfg.delay_ms);
+                
+        // return if childrbe nit found
+        if (children == std::nullopt) {
+            g.record_fetch(url, false);
+            processed.insert({url, false}); // fail state eqse
+            url = todo.front();            
+            continue;
+        }
+
+        g.record_fetch(url, true);
+        
+        auto& children_vec = *children;
+        for (const auto& child_url : children_vec) {
+            bool seen_edge = g.has_edge(url, child_url);
+            bool seen_node = g.has(child_url);
+
+            // edge
+            if (!seen_edge)
+                g.add_edge(url, child_url, seen_node);
+
+            // node
+            if (seen_node) { // ezisting
+            }
+            else if (!seen_node) { // fresh
+                g.add_node(child_url, cfg.__depth);
+                todo.push_back(child_url);
+            }
+        }
+
+        // endloop incr
+        cfg.__size += children_vec.size();
+        processed.insert({url, true});
+        url = todo.front();
+    }
 
     return g;
 }
 
 CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g) {
     // one link many branches, so crawl parebt first, then pricess children, run func on EACH children.
+
 
     // max depth check - compare global vs local
     if (cfg.__depth >= cfg.maxDepth || cfg.__size > cfg.maxSize)
@@ -122,8 +172,7 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
         sleeper.sleep_ms(cfg.delay_ms);
     
     auto children = src.links(root_url);
-    
-    // return if childrbe nit found
+        // return if childrbe nit found
     if (children == std::nullopt) {
         g.record_fetch(root_url, false);
         return g;
@@ -137,18 +186,18 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     cfg.__depth++;
 
     for (const auto& child_url : children_vec) {
-       bool root_child_connected_already = g.has_edge(root_url, child_url);
-       bool seen = g.has(child_url);
+       bool seen_edge = g.has_edge(root_url, child_url);
+       bool seen_node = g.has(child_url);
        const int& new_child_depth = cfg.__depth;
 
        // chexk if a CONNECTION existed and record accordingly       
        // record once, bcs claude spec lol
-    //       bool seen = (root_child_connected_already || url_exist_already);
-       if (!root_child_connected_already)
-           g.add_edge(root_url, child_url, seen);
+    //       bool seen_node = (seen_edge || url_exist_already);
+       if (!seen_edge)
+           g.add_edge(root_url, child_url, seen_node);
 
        // now onto the nodes...
-       if (seen) {
+       if (seen_node) {
             // push pripagation + min serking
             int index = g.id_of(child_url);
             int stored_child_depth = g.nodes[index].depth;
