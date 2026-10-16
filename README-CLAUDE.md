@@ -64,6 +64,7 @@ Polite by default:
 make unit       # build/wc_net_test (URL / link / HTTP / redirect / routing, no network) + BRIDGES JSON golden tests
 make test       # unit, then the ladder: tests/run.sh [X [Y]] [build/wc] [tests/crawl] [timeout_s]
 tests/run.sh 3  # only inputfile3.  tests/run.sh 0 5 = inputfile0..5
+tests/run.sh dfs  # only DFS-mode crawl tests (bfs = BFS). Combines: tests/run.sh dfs 0 9
 build/test_bridges_json tests/bridges/golden            # BRIDGES JSON golden files
 build/test_bridges_json tests/bridges/golden --update   # rewrite them after a format change
 ```
