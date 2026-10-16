@@ -12,7 +12,7 @@
 //     D2  A link to a page that is already in g -> record it as a SEEN edge.
 //     D3  A link from a page to itself -> SEEN edge too.
 //     D4  A page at depth == cfg.maxDepth goes in g. Do not fetch it.
-//     D5  g holds a maximum of cfg.maxSize pages. Count pages that you found.
+//     D5  g holds a maximum of cfg.__size pages. Count pages that you found.
 //     D6  Depth of a page = smallest number of hops from start.
 //     D8  Sleep count = fetch count - 1.
 //     D9  start is not in the web -> 1 failed fetch. start stays in g at depth 0.
@@ -114,15 +114,19 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     // one link many branches, so crawl parebt first, then pricess children, run func on EACH children.
 
     // max depth check - compare global vs local
-    if (cfg.maxDepth == 0 || cfg.maxSize == 1) g.record_fetch(root_url, true);
-    if (cfg.maxDepth <= 0 || cfg.maxSize <= 1) return g;
-
+    if (cfg.__depth == cfg.maxDepth || cfg.__size == cfg.maxSize)
+        g.record_fetch(root_url, true);
+    if (cfg.__depth >= cfg.maxDepth || cfg.__size >= cfg.maxSize)
+        return g;
 
     g.record_fetch(root_url, true);
+
+    // root doesnt sleep
+    if (cfg.__depth > 0)
+        sleeper.sleep_ms(cfg.delay_ms);
     
     auto children = src.links(root_url);
-    sleeper.sleep_ms(cfg.delay_ms);
-
+    
     // return if childrbe nit found
     if (children == std::nullopt) {
         g.record_fetch(root_url, false);
@@ -132,7 +136,7 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     auto& children_vec = *children;
 
     // setup config for child crawl
-    cfg.maxDepth--;
+    cfg.__depth++;
 
     for (const auto& child_url : children_vec) {
        bool root_child_connected_already = g.has_edge(root_url, child_url);
@@ -145,7 +149,10 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
        // now onto the nodes...
        if (url_exist_already) continue;
 
-       cfg.maxSize--; // dfs bookkeeping
+       const int& child_depth = cfg.__depth;
+       g.add_node(child_url, child_depth);
+       
+       cfg.__size = g.nodes.size(); // dfs bookkeeping, query capacity after each child is crawled
        
        g = Crawler::crawl_dfs(child_url, cfg, src, sleeper, g); // update graph with new state
     }

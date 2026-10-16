@@ -15,6 +15,8 @@ struct CrawlConfig {
     int maxDepth = 3;    // spec default
     int maxSize = 1000;  // spec default, max NODES in the graph
     int delay_ms = 100;  // spec: usleep 0.1 s between requests
+    int __depth = 0; // internal use
+    int __size = 0;
 };
 
 // Contract: see the header comment in crawl.cc.
