@@ -73,6 +73,9 @@ target_compile_options(wc PRIVATE -Wall -Wextra)
 add_executable(wc_net_test tests/unit/net_test.cc)
 target_link_libraries(wc_net_test PRIVATE wc_net wc_core)
 target_compile_options(wc_net_test PRIVATE -Wall -Wextra)
+add_executable(wc_graph_test tests/unit/graph_test.cc)
+target_link_libraries(wc_graph_test PRIVATE wc_core)
+target_compile_options(wc_graph_test PRIVATE -Wall -Wextra)
 
 # --- test_bridges_json: golden tests for the BRIDGES JSON writer -----------
 add_executable(test_bridges_json tests/bridges/test_bridges_json.cc)
