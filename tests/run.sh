@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-# tests/run.sh [binary=build/wc] [testdir=tests/crawl] [timeout_s=2]
+# tests/run.sh [X [Y]] [binary=build/wc] [testdir=tests/crawl] [timeout_s=2]
+#   tests/run.sh          all tests
+#   tests/run.sh 3        only inputfile3
+#   tests/run.sh 0 5      inputfile0 .. inputfile5
 # Same rules as Kerney's input_tester: `binary < inputfileX`, stdout only,
 # compared whitespace-insensitive (diff -w) with outputfileX, 2 s timeout,
 # run TWICE (output must be deterministic). Files numbered from 0, no gaps.
 # Exit 1 if anything fails. If $GITHUB_STEP_SUMMARY is set, a table goes there.
 set -u
+num='^[0-9]+$'
+from=0 to=-1                                  # to = -1 -> run until the files run out
+if [[ ${1:-} =~ $num ]]; then
+    from=$1 to=$1; shift
+    if [[ ${1:-} =~ $num ]]; then to=$1; shift; fi
+    ((from <= to)) || { echo "bad range: $from > $to"; exit 2; }
+fi
 bin=${1:-build/wc}
 dir=${2:-tests/crawl}
 limit=${3:-2}
@@ -14,8 +24,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 pass=0 fail=0 rows=""
-x=0
-while [ -e "$dir/inputfile$x" ]; do
+x=$from
+[ -e "$dir/inputfile$x" ] || { echo "no $dir/inputfile$x"; exit 2; }
+while [ -e "$dir/inputfile$x" ] && { [ "$to" -lt 0 ] || [ "$x" -le "$to" ]; }; do
     in="$dir/inputfile$x" want="$dir/outputfile$x"
     timeout -s TERM "$limit" "$bin" < "$in" > "$tmp/out1" 2>/dev/null
     rc=$?
@@ -51,12 +62,12 @@ while [ -e "$dir/inputfile$x" ]; do
     rows+="| $x | $verdict |"$'\n'
     x=$((x + 1))
 done
-for extra in "$dir"/inputfile*; do   # a gap silently skips files in Kerney's loop
+[ "$to" -lt 0 ] && for extra in "$dir"/inputfile*; do   # a gap silently skips files in Kerney's loop
     n=${extra##*inputfile}
     [ "$n" -ge "$x" ] 2>/dev/null && echo "WARNING: gap before inputfile$n (not run)"
 done
 
-summary="$pass passed, $fail failed, $x total ($dir)"
+summary="$pass passed, $fail failed, $((pass + fail)) total ($dir)"
 echo "SUMMARY: $summary"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     { echo "## crawl ladder: $summary"; echo; echo "| rung | result |"; echo "|---|---|"; printf '%s' "$rows"; } >> "$GITHUB_STEP_SUMMARY"
