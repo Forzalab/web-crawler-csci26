@@ -42,10 +42,13 @@ struct CrawlGraph {
     bool has_edge(const std::string& from, const std::string& to) const;
     void add_edge(const std::string& from, const std::string& to, bool seen);
     void record_fetch(const std::string& url, bool ok); // appends Fetch + sets node status
+    // lower url's depth and push the change to everything reachable via recorded edges (D6)
+    void update_node(const std::string& url, int depth);
 
 private:
     std::unordered_map<std::string, int> index_;        // url -> nodes[] position (lookup only)
     std::unordered_map<std::string, int> edge_index_;   // "from\nto" -> edges[] position
+    std::unordered_map<std::string, std::vector<int>> out_;  // from -> edges[] positions
 };
 
 const char* to_string(Mode m);

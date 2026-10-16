@@ -1,5 +1,7 @@
 #include "core/graph.h"
 
+#include <deque>
+
 namespace wc {
 
 namespace {
@@ -28,7 +30,28 @@ bool CrawlGraph::has_edge(const std::string& from, const std::string& to) const 
 
 void CrawlGraph::add_edge(const std::string& from, const std::string& to, bool seen) {
     edge_index_[edge_key(from, to)] = static_cast<int>(edges.size());
+    out_[from].push_back(static_cast<int>(edges.size()));
     edges.push_back({from, to, seen});
+}
+
+void CrawlGraph::update_node(const std::string& url, int depth) {
+    int id = id_of(url);
+    if (id < 0 || depth >= nodes[id].depth) return;
+    nodes[id].depth = depth;
+    std::deque<int> work{id};  // only strictly smaller depths re-enqueue, so cycles end
+    while (!work.empty()) {
+        const Node& p = nodes[work.front()];
+        work.pop_front();
+        auto it = out_.find(p.url);
+        if (it == out_.end()) continue;
+        int d = p.depth + 1;
+        for (int e : it->second) {
+            int c = id_of(edges[e].to);
+            if (c < 0 || d >= nodes[c].depth) continue;
+            nodes[c].depth = d;
+            work.push_back(c);
+        }
+    }
 }
 
 void CrawlGraph::record_fetch(const std::string& url, bool ok) {
