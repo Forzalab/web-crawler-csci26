@@ -93,14 +93,18 @@ CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
 
     CrawlGraph g;
     g.mode = cfg.mode;
-    g.add_node(start, 0);
+    Crawler::register_node(start, 0, g);
     
     // run from root
-    if (g.mode == Mode::BFS) return Crawler::crawl_bfs(start, cfg, src, sleeper, g);
-    else if (g.mode == Mode::DFS) return Crawler::crawl_dfs(start, cfg, src, sleeper, g);    
+    if (g.mode == Mode::BFS) g = Crawler::crawl_bfs(start, cfg, src, sleeper, g);
+    else if (g.mode == Mode::DFS) g = Crawler::crawl_dfs(start, cfg, src, sleeper, g);    
+    else g.record_fetch(start, false); // default failure: only start node goes here - wait for testcase behavior
 
-    // default failure: only start node goes here - wait for testcaee behavior
-    g.record_fetch(start, false);
+    // after all nodes have good distance, we can start to add them in grpah.
+    // node store r independent of edges.
+    Crawler::flush_nodes_to_graph(g);
+    Crawler::wipe_processed(); // clean up where you shit
+    
     return g;
 }
 
@@ -150,14 +154,30 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
        if (url_exist_already) continue;
 
        const int& child_depth = cfg.__depth;
-       g.add_node(child_url, child_depth);
+       Crawler::register_node(child_url, child_depth, g);
        
        cfg.__size = g.nodes.size(); // dfs bookkeeping, query capacity after each child is crawled
        
        g = Crawler::crawl_dfs(child_url, cfg, src, sleeper, g); // update graph with new state
     }
-    
+
     return g;
+}
+
+void Crawler::wipe_processed() { processed_index_.clear(); }
+void Crawler::register_node(const std::string& url, int new_depth, CrawlGraph& g) {
+    // only closer depth gets registered
+    if (processed_index_.contains(url)) {
+        int curr_depth = processed_index_.at(url);
+        new_depth = (curr_depth > new_depth) ? new_depth : curr_depth;
+    }
+    // g.add_node(url, new_depth); 
+    // ^^^ add later
+    processed_index_.insert_or_assign(url, new_depth);    
+}
+void Crawler::flush_nodes_to_graph(CrawlGraph& g) {
+    for (const auto& entries : processed_index_)
+        g.add_node(entries.first, entries.second);
 }
 
 }  // namespace wc
