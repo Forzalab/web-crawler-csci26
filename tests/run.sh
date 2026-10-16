@@ -37,11 +37,13 @@ while [ -e "$dir/inputfile$x" ]; do
     else
         fail=$((fail + 1))
         if [ "$verdict" = FAIL ]; then   # show the diff (icdiff if installed, like Kerney)
+            shown=0
             if command -v icdiff > /dev/null; then
-                icdiff -L "yours" -L "expected" "$tmp/out1" "$want" | sed 's/^/    /'
-            else
-                diff -w "$tmp/out1" "$want" | sed 's/^/    /'
+                # some icdiff builds crash (Python traceback); fall back to plain diff then
+                icdiff -L "yours" -L "expected" "$tmp/out1" "$want" > "$tmp/d" 2> "$tmp/e"
+                [ -s "$tmp/e" ] || { sed 's/^/    /' "$tmp/d"; shown=1; }
             fi
+            [ "$shown" = 1 ] || diff -w "$tmp/out1" "$want" | sed 's/^/    /'
         fi
     fi
     rows+="| $x | $verdict |"$'\n'
