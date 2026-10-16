@@ -12,7 +12,8 @@ One binary, `wc`, two front ends:
 Needs CMake 3.16+ and g++ with C++20 or newer. CMake asks for C++23 and falls back to an older standard if the compiler lacks it.
 
 ```sh
-make            # = cmake -S . -B build && cmake --build build
+make            # = cmake -S . -B build && cmake --build build, with a progress bar. Error -> red banner + the error lines. Log: build/build.log
+make V=1        # same, but show the full compiler log live
 make clean
 ```
 
