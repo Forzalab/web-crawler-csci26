@@ -114,8 +114,6 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     // one link many branches, so crawl parebt first, then pricess children, run func on EACH children.
 
     // max depth check - compare global vs local
-    if (cfg.__depth == cfg.maxDepth || cfg.__size == cfg.maxSize)
-        g.record_fetch(root_url, true);
     if (cfg.__depth >= cfg.maxDepth || cfg.__size >= cfg.maxSize)
         return g;
 
@@ -141,16 +139,21 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     for (const auto& child_url : children_vec) {
        bool root_child_connected_already = g.has_edge(root_url, child_url);
        bool url_exist_already = g.has(child_url);
+       const int& new_child_depth = cfg.__depth;
 
        // chexk if a CONNECTION existed and record accordingly       
        bool seen = (root_child_connected_already || url_exist_already);
        g.add_edge(root_url, child_url, seen);
 
        // now onto the nodes...
-       if (url_exist_already) continue;
+       if (url_exist_already) {
+           int index = g.id_of(child_url);
+           int& curr_child_depth = g.nodes[index].depth;
+           curr_child_depth = std::min(curr_child_depth, new_child_depth);
+           continue;
+       }
 
-       const int& child_depth = cfg.__depth;
-       g.add_node(child_url, child_depth);
+       g.add_node(child_url, new_child_depth);
        
        cfg.__size = g.nodes.size(); // dfs bookkeeping, query capacity after each child is crawled
        
