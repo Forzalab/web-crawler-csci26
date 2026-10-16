@@ -39,8 +39,10 @@ while [ -e "$dir/inputfile$x" ]; do
         if [ "$verdict" = FAIL ]; then   # show the diff (icdiff if installed, like Kerney)
             shown=0
             if command -v icdiff > /dev/null; then
-                # some icdiff builds crash (Python traceback); fall back to plain diff then
-                icdiff -L "yours" -L "expected" "$tmp/out1" "$want" > "$tmp/d" 2> "$tmp/e"
+                # -w like Kerney's input_tester: the server's patched icdiff crashes (WStr) without it.
+                # Stock icdiff has no -w and errors out -> stderr -> plain diff below.
+                cols=$(tput cols 2>/dev/null || echo 80)
+                icdiff -w --cols="$cols" -L "yours" -L "expected" "$tmp/out1" "$want" > "$tmp/d" 2> "$tmp/e"
                 [ -s "$tmp/e" ] || { sed 's/^/    /' "$tmp/d"; shown=1; }
             fi
             [ "$shown" = 1 ] || diff -w "$tmp/out1" "$want" | sed 's/^/    /'
