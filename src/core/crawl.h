@@ -24,14 +24,16 @@ CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
                  LinkSource& src, Sleeper& sleeper);
 
 class Crawler {
-    static std::unordered_map<std::string, int> processed_index_;
+    static std::vector<std::string> discover_queue;
+    static std::unordered_map<std::string, std::pair<int, Status>> processed_index_; // {url, {depth, status}}
 public:
     // these will ignore CrawlConfig::mode
     // returning ref. mgiht be a trap waiting to bloom yay
     static CrawlGraph& crawl_bfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
     static CrawlGraph& crawl_dfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
     static void wipe_processed();
-    static void register_node(const std::string& root_url, int new_depth, CrawlGraph& g);
+    static void register_fetch(const std::string& url, Status fetch_status, CrawlGraph& g);
+    static void register_node(const std::string& url, int new_depth, CrawlGraph& g);
     static void flush_nodes_to_graph(CrawlGraph& g);
 };
 

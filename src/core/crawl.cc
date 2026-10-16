@@ -86,6 +86,9 @@ void record_fetch(const string& url, bool ok)        // adds a Fetch AND sets th
 
 namespace wc {
 
+decltype(Crawler::processed_index_) Crawler::processed_index_; // static define member
+decltype(Crawler::discover_queue) Crawler::discover_queue; // static define member
+
 CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
                  LinkSource& src, Sleeper& sleeper) {
     // TODO(Tony): fetch with src.links(url)
@@ -98,7 +101,7 @@ CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
     // run from root
     if (g.mode == Mode::BFS) g = Crawler::crawl_bfs(start, cfg, src, sleeper, g);
     else if (g.mode == Mode::DFS) g = Crawler::crawl_dfs(start, cfg, src, sleeper, g);    
-    else g.record_fetch(start, false); // default failure: only start node goes here - wait for testcase behavior
+    else Crawler::register_fetch(start, Status::Failed, g); // default failure: only start node goes here - wait for testcase behavior
 
     // after all nodes have good distance, we can start to add them in grpah.
     // node store r independent of edges.
@@ -119,11 +122,11 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
 
     // max depth check - compare global vs local
     if (cfg.__depth == cfg.maxDepth || cfg.__size == cfg.maxSize)
-        g.record_fetch(root_url, true);
+        Crawler::register_fetch(root_url, Status::Failed, g);
     if (cfg.__depth >= cfg.maxDepth || cfg.__size >= cfg.maxSize)
         return g;
 
-    g.record_fetch(root_url, true);
+    Crawler::register_fetch(root_url, Status::Fetched, g);
 
     // root doesnt sleep
     if (cfg.__depth > 0)
@@ -133,7 +136,7 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     
     // return if childrbe nit found
     if (children == std::nullopt) {
-        g.record_fetch(root_url, false);
+        Crawler::register_fetch(root_url, Status::Failed, g);
         return g;
     }
 
@@ -163,21 +166,35 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
 
     return g;
 }
-
-void Crawler::wipe_processed() { processed_index_.clear(); }
+void Crawler::register_fetch(const std::string& url, Status fetch_status, CrawlGraph& g) {
+    // assume url is added, just like g.record_fetch - if this is broken then screw you
+    auto url_info = processed_index_.at(url);
+    processed_index_.insert_or_assign(url, std::make_pair(url_info.first, fetch_status));
+}
 void Crawler::register_node(const std::string& url, int new_depth, CrawlGraph& g) {
     // only closer depth gets registered
     if (processed_index_.contains(url)) {
-        int curr_depth = processed_index_.at(url);
+        int curr_depth = processed_index_.at(url).first;
         new_depth = (curr_depth > new_depth) ? new_depth : curr_depth;
+    } else {
+        // url didnt exist so addable
+        discover_queue.emplace_back(url);
     }
     // g.add_node(url, new_depth); 
     // ^^^ add later
-    processed_index_.insert_or_assign(url, new_depth);    
+    Status fetch_status = (processed_index_.contains(url)) ? (processed_index_.at(url).second) : Status::Unfetched;
+    processed_index_.insert_or_assign(url, std::make_pair(new_depth, fetch_status));    
 }
 void Crawler::flush_nodes_to_graph(CrawlGraph& g) {
-    for (const auto& entries : processed_index_)
-        g.add_node(entries.first, entries.second);
+    for (const auto& url : discover_queue) {
+        int url_true_depth = processed_index_.at(url).first;
+        Status url_fetch_status = processed_index_.at(url).second;
+        g.add_node(url, url_true_depth); // {url, {depth, status}}
+        if (url_fetch_status == Status::Unfetched) continue;
+        else g.record_fetch(url, (url_fetch_status == Status::Fetched));
+    }
 }
-
+void Crawler::wipe_processed() { 
+    processed_index_.clear();
+}
 }  // namespace wc
