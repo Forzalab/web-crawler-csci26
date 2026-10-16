@@ -71,7 +71,7 @@ Mode mode
 vector<Node>  nodes     Node  { string url; int depth; Status status; }
 vector<Edge>  edges     Edge  { string from, to; bool seen; }
 vector<Fetch> fetches   Fetch { string url; int depth; bool ok; }
-Status = Unfetched | Fetched | Failed
+Status = Unfetched | Fetched | ,aFailed
 
 ---- HELPERS ----
 bool has(const string& url)
@@ -138,20 +138,24 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
 
     for (const auto& child_url : children_vec) {
        bool root_child_connected_already = g.has_edge(root_url, child_url);
-       bool url_exist_already = g.has(child_url);
+       bool seen = g.has(child_url);
        const int& new_child_depth = cfg.__depth;
 
        // chexk if a CONNECTION existed and record accordingly       
-       bool seen = (root_child_connected_already || url_exist_already);
-       g.add_edge(root_url, child_url, seen);
+       // record once, bcs claude spec lol
+    //       bool seen = (root_child_connected_already || url_exist_already);
+       if (!root_child_connected_already)
+           g.add_edge(root_url, child_url, seen);
 
        // now onto the nodes...
-       if (url_exist_already) {
-           int index = g.id_of(child_url);
-           int& curr_child_depth = g.nodes[index].depth;
-           curr_child_depth = std::min(curr_child_depth, new_child_depth);
-           continue;
-       }
+       if (seen) {
+            // push pripagation + min serking
+            int index = g.id_of(child_url);
+            int stored_child_depth = g.nodes[index].depth;
+            int true_depth = std::min(stored_child_depth, new_child_depth);
+            g.update_node(child_url, true_depth);
+            continue;
+       } // skip node-adding ritual for seen nodes
 
        g.add_node(child_url, new_child_depth);
        
