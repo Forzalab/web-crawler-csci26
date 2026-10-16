@@ -1,11 +1,12 @@
 # Thin wrapper so `make` works out of habit. The real build is CMake.
 BUILD ?= build
+# make V=1 -> show the full compiler log while building
+V ?= 0
 
 .PHONY: all test unit clean
 
 all:
-	cmake -S . -B $(BUILD)
-	cmake --build $(BUILD) -j
+	@VERBOSE=$(V) scripts/build.sh $(BUILD)
 
 unit: all
 	$(BUILD)/wc_net_test
