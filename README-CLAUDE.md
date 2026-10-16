@@ -14,6 +14,7 @@ Needs CMake 3.16+ and g++ with C++20 or newer. CMake asks for C++23 and falls ba
 ```sh
 make            # = cmake -S . -B build && cmake --build build, with a progress bar. Error -> red banner + the error lines. Log: build/build.log
 make V=1        # same, but show the full compiler log live
+make lint       # gentle C++ habit tips (using namespace std in headers, NULL, raw new, ...). Never fails the build
 make clean
 ```
 

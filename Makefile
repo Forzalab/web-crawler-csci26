@@ -3,7 +3,7 @@ BUILD ?= build
 # make V=1 -> show the full compiler log while building
 V ?= 0
 
-.PHONY: all test unit clean
+.PHONY: all test unit lint clean
 
 all:
 	@VERBOSE=$(V) scripts/build.sh $(BUILD)
@@ -14,6 +14,9 @@ unit: all
 
 test: unit
 	tests/run.sh $(BUILD)/wc tests/crawl
+
+lint:
+	@scripts/lint.sh
 
 clean:
 	rm -rf $(BUILD)
