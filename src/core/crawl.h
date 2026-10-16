@@ -25,8 +25,8 @@ class Crawler {
 public:
     // these will ignore CrawlConfig::mode
     // returning ref. mgiht be a trap waiting to bloom yay
-    CrawlGraph& crawl_bfs(const std::string& start, const CrawlConfig& cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
-    CrawlGraph& crawl_dfs(const std::string& start, const CrawlConfig& cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
+    static CrawlGraph& crawl_bfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
+    static CrawlGraph& crawl_dfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
 };
 
 }  // namespace wc

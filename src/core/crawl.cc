@@ -94,21 +94,62 @@ CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
     CrawlGraph g;
     g.mode = cfg.mode;
     g.add_node(start, 0);
-
-    // check start node first
     
-    // lazy to put 
+    // run from root
+    if (g.mode == Mode::BFS) return Crawler::crawl_bfs(start, cfg, src, sleeper, g);
+    else if (g.mode == Mode::DFS) return Crawler::crawl_dfs(start, cfg, src, sleeper, g);    
+
+    // default failure: only start node goes here - wait for testcaee behavior
+    g.record_fetch(start, false);
     return g;
 }
 
-CrawlGraph& Crawler::crawl_bfs(const std::string& start, const CrawlConfig& cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g) {
-    
+CrawlGraph& Crawler::crawl_bfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g) {
+    // on
 
     return g;
 }
 
-CrawlGraph& Crawler::crawl_dfs(const std::string& start, const CrawlConfig& cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g) {
+CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g) {
+    // one link many branches, so crawl parebt first, then pricess children, run func on EACH children.
 
+    // max depth check - compare global vs local
+    if (cfg.maxDepth == 0 || cfg.maxSize == 1) g.record_fetch(root_url, true);
+    if (cfg.maxDepth <= 0 || cfg.maxSize <= 1) return g;
+
+
+    g.record_fetch(root_url, true);
+    
+    auto children = src.links(root_url);
+    sleeper.sleep_ms(cfg.delay_ms);
+
+    // return if childrbe nit found
+    if (children == std::nullopt) {
+        g.record_fetch(root_url, false);
+        return g;
+    }
+
+    auto& children_vec = *children;
+
+    // setup config for child crawl
+    cfg.maxDepth--;
+
+    for (const auto& child_url : children_vec) {
+       bool root_child_connected_already = g.has_edge(root_url, child_url);
+       bool url_exist_already = g.has(child_url);
+
+       // chexk if a CONNECTION existed and record accordingly       
+       bool seen = (root_child_connected_already || url_exist_already);
+       g.add_edge(root_url, child_url, seen);
+
+       // now onto the nodes...
+       if (url_exist_already) continue;
+
+       cfg.maxSize--; // dfs bookkeeping
+       
+       g = Crawler::crawl_dfs(child_url, cfg, src, sleeper, g); // update graph with new state
+    }
+    
     return g;
 }
 
