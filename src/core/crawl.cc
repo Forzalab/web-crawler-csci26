@@ -114,10 +114,8 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     // one link many branches, so crawl parebt first, then pricess children, run func on EACH children.
 
     // max depth check - compare global vs local
-    if (cfg.__depth >= cfg.maxDepth || cfg.__size >= cfg.maxSize)
+    if (cfg.__depth >= cfg.maxDepth || cfg.__size > cfg.maxSize)
         return g;
-
-    g.record_fetch(root_url, true);
 
     // root doesnt sleep
     if (cfg.__depth > 0)
@@ -131,6 +129,8 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
         return g;
     }
 
+    g.record_fetch(root_url, true);
+    
     auto& children_vec = *children;
 
     // setup config for child crawl
