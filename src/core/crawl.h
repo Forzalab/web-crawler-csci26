@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+#include <deque>
 
 #include "core/graph.h"
 #include "core/link_source.h"
@@ -19,5 +20,13 @@ struct CrawlConfig {
 // Contract: see the header comment in crawl.cc.
 CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
                  LinkSource& src, Sleeper& sleeper);
+
+class Crawler {
+public:
+    // these will ignore CrawlConfig::mode
+    // returning ref. mgiht be a trap waiting to bloom yay
+    CrawlGraph& crawl_bfs(const std::string& start, const CrawlConfig& cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
+    CrawlGraph& crawl_dfs(const std::string& start, const CrawlConfig& cfg, LinkSource& src, Sleeper& sleeper, CrawlGraph& g);
+};
 
 }  // namespace wc
