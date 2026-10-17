@@ -96,6 +96,14 @@ if [ "$rc" -eq 0 ]; then
         " ██████  ██   ██ ██"
     echo
     echo "  ${G}BUILD OK${N} in ${secs}s.  ${D}next: tests/run.sh   |   log: $log${N}"
+    # the bar hides compiler output, so surface warnings here (only files rebuilt this time)
+    warns=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -E ': warning:' | grep -v '/third_party/')
+    if [ -n "$warns" ]; then
+        echo
+        echo "  ${Y}$(wc -l <<< "$warns") compiler warning(s) in files rebuilt this time:${N}"
+        head -n 15 <<< "$warns" | sed 's/^/    /'
+    fi
+    [ -x scripts/lint.sh ] && scripts/lint.sh --summary
     exit 0
 fi
 
