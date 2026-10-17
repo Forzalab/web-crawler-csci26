@@ -120,6 +120,12 @@ std::string short_label(const std::string& url) {
     return s;
 }
 
+std::string url_path(const std::string& url) {
+    size_t s = url.find("://");
+    size_t p = url.find('/', s == std::string::npos ? 0 : s + 3);
+    return p == std::string::npos ? "/" : url.substr(p);
+}
+
 std::string node_label(const std::string& url, const std::string& root_url) {
     std::string host = short_label(url), lab = host;
     if (url != root_url && host == short_label(root_url)) {

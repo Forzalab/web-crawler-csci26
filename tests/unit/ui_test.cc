@@ -7,6 +7,7 @@
 #include "ui/camera.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
+#include "ui/progress.h"
 #include "ui/replay.h"
 
 using namespace wc;
@@ -227,7 +228,68 @@ static void test_sites() {
     CHECK_EQ(l.shape[4], 2);
 }
 
+// A fake web: home -> a, b ; a -> a1 ; b fails. The tap must pass results through untouched.
+struct FakeWeb : LinkSource {
+    std::optional<std::vector<std::string>> links(const std::string& url) override {
+        if (url == "https://home.com/") return std::vector<std::string>{"https://a.com/", "https://b.com/"};
+        if (url == "https://a.com/") return std::vector<std::string>{"https://a.com/1", "https://home.com/"};
+        if (url == "https://a.com/1") return std::vector<std::string>{};
+        return std::nullopt;
+    }
+};
+
+static void test_progress() {
+    FakeWeb web;
+    ProgressTap tap(web);
+    CHECK_EQ(tap.snapshot().pages, 0);
+    CHECK_EQ(tap.links("https://home.com/")->size(), size_t(2));
+    CHECK_EQ(tap.links("https://a.com/")->size(), size_t(2));
+    CHECK_EQ(tap.links("https://b.com/").has_value(), false);
+    CHECK_EQ(tap.links("https://a.com/1")->size(), size_t(0));
+    CHECK_EQ(tap.links("https://nowhere.net/").has_value(), false);  // never a link: keeps the last depth
+    Progress p = tap.snapshot();
+    CHECK_EQ(p.pages, 5);
+    CHECK_EQ(p.ok, 3);
+    CHECK_EQ(p.failed, 2);
+    CHECK_EQ(p.links, 4);
+    CHECK_EQ(p.depth, 2);
+    CHECK_EQ(p.recent.size(), size_t(5));
+    CHECK_EQ(p.recent[0].url, std::string("https://home.com/"));
+    CHECK_EQ(p.recent[0].depth, 0);
+    CHECK_EQ(p.recent[1].depth, 1);
+    CHECK_EQ(p.recent[2].ok, false);
+    CHECK_EQ(p.recent[3].depth, 2);
+    CHECK_EQ(p.recent[4].depth, 2);
+    // Trimmed: the newest `last_n`, order kept; counters untouched.
+    Progress t = tap.snapshot(2);
+    CHECK_EQ(t.recent.size(), size_t(2));
+    CHECK_EQ(t.recent[0].url, std::string("https://a.com/1"));
+    CHECK_EQ(t.recent[1].url, std::string("https://nowhere.net/"));
+    CHECK_EQ(t.pages, 5);
+    CHECK_EQ(tap.snapshot(99).recent.size(), size_t(5));
+    CHECK_EQ(url_path("https://a.org/x/y?q"), std::string("/x/y?q"));
+    CHECK_EQ(url_path("https://a.org"), std::string("/"));
+}
+
+static void test_loading_line() {
+    std::string a = loading_line(0), b = loading_line(1999), c = loading_line(2000);
+    CHECK_EQ(a.empty(), false);
+    CHECK_EQ(a, b);
+    CHECK_EQ(a == c, false);
+    CHECK_EQ(loading_line(0, 500), a);
+    CHECK_EQ(loading_line(500, 500), c);
+    CHECK_EQ(loading_line(-5), a);
+    // Rotates through every line, then wraps back to the first.
+    int n = 1;
+    while (loading_line(int64_t(n) * 2000) != a && n < 100) ++n;
+    CHECK_EQ(n >= 15 && n <= 25, true);
+    CHECK_EQ(loading_line(int64_t(n + 1) * 2000), c);
+    for (int i = 0; i < n; ++i) CHECK_EQ(loading_line(int64_t(i) * 2000).size() <= 40, true);
+}
+
 int main() {
+    test_progress();
+    test_loading_line();
     test_sites();
     test_layout();
     test_fit();
