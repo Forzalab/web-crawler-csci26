@@ -2,7 +2,10 @@
 // URL -> Visualize? -> Max depth -> Max pages -> crawl (live loading screen) -> graph + omnibar.
 // Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow.
 // Graph keys (empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
+// Zoom keys that also work mid-typing (Termux extra-keys row): PgUp in, PgDn out (preview closed).
+// Every frame is one bracketed write (ui/term_lock.h): no row-by-row redraw.
 // Enter on a result opens its page preview (cache, else live fetch).
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <chrono>
@@ -33,6 +36,7 @@
 #include "ui/osc52.h"
 #include "ui/progress.h"
 #include "ui/replay.h"
+#include "ui/term_lock.h"
 #include "ui/theme.h"
 #include "ui/views.h"
 #include "ui/yes_no.h"
@@ -44,6 +48,9 @@ namespace th = wc::theme;
 using Clock = std::chrono::steady_clock;
 
 namespace {
+
+// Zoom keys, shown under the omnibar and in /help. + - 0 Home need an empty omnibar.
+constexpr const char* kZoomHint = "zoom + - 0 · PgUp PgDn";
 
 // Onboarding coach marks, first run only. Copy lives here so it is easy to rewrite.
 const std::vector<std::string> kCoach = {
@@ -118,7 +125,8 @@ int tui_main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--no-anim")) no_anim = true;
     bool first_run = !std::ifstream(seen_path()).good();
 
-    auto screen = ScreenInteractive::Fullscreen();
+    TermLock term_lock;  // before `screen`: outlives it, so FTXUI's restore bytes go out too
+    auto screen = ScreenInteractive::Fullscreen();  // alt screen, mouse on, cursor hidden while drawing
     Step step = Step::Url;
     CrawlConfig cfg;
     cfg.maxSize = 50;
@@ -315,7 +323,8 @@ int tui_main(int argc, char** argv) {
         ghost = ghost.size() > omni_text.size() ? ghost.substr(omni_text.size()) : "";
         if (omni_text.empty()) ghost = "Type to find a page.\nExample: " + example_label(g);
 
-        int extra = ghost.find('\n') != std::string::npos;  // 2-line placeholder: one more row in the box
+        if (omni_text.empty()) ghost += "\n" + std::string(kZoomHint);
+        int extra = int(std::count(ghost.begin(), ghost.end(), '\n'));  // placeholder lines: rows in the box
         // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar (2) + omnibar (3 + results).
         auto ts = Terminal::Size();
         int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()) - extra);
@@ -383,7 +392,7 @@ int tui_main(int argc, char** argv) {
         Query q = parse_query(omni_text);
         if (q.verb == "quit") return screen.Exit();
         if (q.verb == "help") {
-            toast("wiki · depth:<3 · status:failed · /bridges /help /quit");
+            toast("wiki · depth:<3 · status:failed · /bridges /help /quit · " + std::string(kZoomHint));
             return set_omni("");
         }
         if (q.verb == "bridges") return void(bridges_shown = true);
@@ -489,10 +498,12 @@ int tui_main(int argc, char** argv) {
         if (e.is_mouse() && e.mouse().button == Mouse::WheelDown) return zoom(1 / 1.25), true;
         if (pv_open && e == Event::PageDown) return pv_scroll += 10, true;
         if (pv_open && e == Event::PageUp) return pv_scroll = std::max(0, pv_scroll - 10), true;
+        if (e == Event::PageUp) return zoom(1.25), true;  // kZoomHint: work while typing too
+        if (e == Event::PageDown) return zoom(1 / 1.25), true;
         if (empty) {
             if (e == Event::Character('+') || e == Event::Character('=')) return zoom(1.25), true;
-            if (e == Event::Character('-')) return zoom(1 / 1.25), true;
-            if (e == Event::Character('0')) return cam_target = Camera{}, true;
+            if (e == Event::Character('-') || e == Event::Character('_')) return zoom(1 / 1.25), true;
+            if (e == Event::Character('0') || e == Event::Home) return cam_target = Camera{}, true;
             if (e == Event::ArrowLeft) return cam_target.px += pan, true;
             if (e == Event::ArrowRight) return cam_target.px -= pan, true;
             if (e == Event::ArrowUp) return cam_target.py += pan, true;
@@ -514,9 +525,9 @@ int tui_main(int argc, char** argv) {
             return true;
         }
         if (bridges_shown) bridges_shown = false;
-        bool handled = inputs->OnEvent(e);
+        inputs->OnEvent(e);
         refresh_hits();
-        return handled;
+        return true;  // swallow the rest (unknown keys / escape sequences): nothing else sees them
     });
 
     screen.Loop(app);
