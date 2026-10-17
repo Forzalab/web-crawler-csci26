@@ -1,7 +1,10 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
 // URL -> Visualize? -> Max depth -> Max pages -> crawl (spinner) -> graph + omnibar.
-// Flags: --no-anim (or NO_COLOR) jumps the replay to the end.
+// Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow.
+// Graph keys (empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
+// Enter on a result opens its page preview (cache, else live fetch).
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -20,7 +23,9 @@
 #include "core/crawl.h"
 #include "net/cache.h"
 #include "net/https_fetcher.h"
+#include "ui/camera.h"
 #include "ui/front_ends.h"
+#include "ui/html_text.h"
 #include "ui/layout.h"
 #include "ui/omni_query.h"
 #include "ui/osc52.h"
@@ -36,7 +41,25 @@ using Clock = std::chrono::steady_clock;
 
 namespace {
 
+// Onboarding coach marks, first run only. Copy lives here so it is easy to rewrite.
+const std::vector<std::string> kCoach = {
+    "Type to find a page.",
+    "Enter opens it. Esc closes.",
+    "/bridges to share.",
+};
+
 enum class Step { Url, Visualize, Depth, Pages, Crawling, Main, Summary };
+
+// Page path for the preview title: "https://a.org/x/y?q" -> "/x/y?q" ("/" if none).
+std::string url_path(const std::string& url) {
+    size_t s = url.find("://");
+    size_t p = url.find('/', s == std::string::npos ? 0 : s + 3);
+    return p == std::string::npos ? "/" : url.substr(p);
+}
+
+bool settled(const Camera& a, const Camera& b) {
+    return std::abs(a.zoom - b.zoom) < 1e-3 && std::abs(a.px - b.px) < 1e-3 && std::abs(a.py - b.py) < 1e-3;
+}
 
 int64_t ms_since(Clock::time_point t) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t).count();
@@ -149,6 +172,21 @@ int tui_main(int argc, char** argv) {
     std::vector<int> hits;
     int selected = 0;
 
+    // Camera: cam eases toward target every frame; auto-fit once, 2 s after replay + idle.
+    Camera cam, cam_target;
+    Clock::time_point last_frame, last_input, replay_done_at;
+    bool replay_done = false, auto_fitted = false, hint_shown = false;
+    int coach_step = -1;  // index into kCoach; -1 = not showing
+
+    // Preview: one fetch thread at a time; gen drops stale deliveries.
+    bool pv_open = false, pv_max = false;
+    int pv_scroll = 0, pv_gen = 0;
+    std::string pv_title;
+    std::vector<std::string> pv_lines;
+    Clock::time_point pv_at;
+    std::thread pv_worker;
+    std::atomic<bool> pv_busy{false};
+
     auto toast = [&](const std::string& s) {
         toast_text = s;
         toast_at = Clock::now();
@@ -196,10 +234,40 @@ int tui_main(int argc, char** argv) {
             return;
         }
         lay = radial_layout(g);
-        t0 = Clock::now();
+        t0 = last_frame = last_input = Clock::now();
         step = Step::Main;
         tab = 2;
         refresh_hits();
+    };
+
+    auto open_preview = [&](const Node& n) {
+        pv_open = true;
+        pv_scroll = 0;
+        pv_at = Clock::now();
+        pv_title = short_label(n.url) + url_path(n.url);
+        int gen = ++pv_gen;
+        if (auto hit = cache.load(n.url); hit && !hit->body.empty()) {
+            pv_lines = html_to_lines(hit->body);
+            return;
+        }
+        pv_lines = {"loading…"};
+        if (pv_busy) return pv_lines.assign({"busy: still fetching the last page"});  // retry Enter later
+        if (pv_worker.joinable()) pv_worker.join();
+        pv_busy = true;
+        pv_worker = std::thread([&, gen, url = n.url] {
+            FetchResult r = tls.fetch(url);  // crawl is over: the worker is free
+            std::vector<std::string> ls = r.error.empty() ? html_to_lines(r.body) : std::vector<std::string>{"✕ " + r.error};
+            if (ls.empty()) ls = {"(no text)"};
+            screen.Post([&, gen, ls = std::move(ls)]() mutable {
+                if (gen == pv_gen) pv_lines = std::move(ls);
+            });
+            pv_busy = false;
+            screen.PostEvent(Event::Custom);
+        });
+    };
+    auto close_preview = [&] {
+        pv_open = pv_max = false;
+        ++pv_gen;
     };
 
     auto main_screen = [&]() -> Element {
@@ -214,7 +282,26 @@ int tui_main(int argc, char** argv) {
         bool fd = flashing(flashed_depth, flash_depth_at), fs = flashing(flashed_size, flash_size_at);
         bool flash_live = (flashed_depth && ms_since(flash_depth_at) < 600) || (flashed_size && ms_since(flash_size_at) < 600);
         bool toast_live = !toast_text.empty() && ms_since(toast_at) < 1500;
-        if (!f.done || flash_live || toast_live) animation::RequestAnimationFrame();
+
+        // Replay done: start coach marks (first run), then auto-fit once after 2 s idle.
+        if (f.done && !replay_done) {
+            replay_done = true;
+            replay_done_at = Clock::now();
+            if (first_run) coach_step = 0;
+        }
+        bool fit_wait = replay_done && !auto_fitted;
+        if (fit_wait && ms_since(std::max(replay_done_at, last_input)) >= 2000) {
+            auto_fitted = true, fit_wait = false;
+            cam_target = Camera{};
+            if (coach_step < 0 && !hint_shown) hint_shown = true, toast("/bridges to share the graph"), toast_live = true;
+        }
+        double dt = std::chrono::duration<double>(Clock::now() - last_frame).count();
+        last_frame = Clock::now();
+        bool cam_moving = !settled(cam, cam_target);
+        cam = cam_moving && !no_anim ? ease(cam, cam_target, std::min(dt, 0.1)) : cam_target;
+        float glow = no_anim ? 1.0f : float(0.5 + 0.5 * std::sin(ms_since(pv_at) / 1000.0 * 2 * M_PI / 1.2));
+        if (!f.done || flash_live || toast_live || fit_wait || cam_moving || (pv_open && !no_anim))
+            animation::RequestAnimationFrame();
 
         std::vector<std::string> rows;
         if (bridges_shown) {
@@ -232,11 +319,23 @@ int tui_main(int argc, char** argv) {
         // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar (2) + omnibar (3 + results).
         auto ts = Terminal::Size();
         int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()));
-        View v = fit(lay, ts.dimx * 2, rows_left * 4);
+        View v = apply(cam, fit(lay, ts.dimx * 2, rows_left * 4), ts.dimx * 2, rows_left * 4);
 
         Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
                              views::graph(g, lay, f, v) | flex,
                              views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost)});
+        // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast.
+        if (pv_open) {
+            pv_scroll = std::clamp(pv_scroll, 0, std::max(0, int(pv_lines.size()) - 1));
+            Element p = views::preview(pv_title, pv_lines, pv_scroll, glow, pv_max);
+            p = pv_max ? p | flex : p | size(HEIGHT, LESS_THAN, ts.dimy * 7 / 10);
+            body = dbox({body, pv_max ? p : hbox({filler(), vbox({filler(), p, filler()}), text(" ")})  /* 1-col gap: borders join */});
+        }
+        if (!pv_open && coach_step >= 0 && coach_step < int(kCoach.size())) {  // never over the preview
+            Element c = views::coach(coach_step + 1, int(kCoach.size()), kCoach[coach_step]);
+            body = dbox({body, vbox({filler(), hbox({filler(), c, filler()}),
+                                     emptyElement() | size(HEIGHT, EQUAL, 3 + int(rows.size()))})});
+        }
         if (toast_live)
             body = dbox({body, vbox({hbox({filler(), views::toast(toast_text)}), filler()})});
         return body;
@@ -265,11 +364,12 @@ int tui_main(int argc, char** argv) {
             return set_omni("");
         }
         if (q.verb == "bridges") return void(bridges_shown = true);
-        if (!q.verb.empty()) return toast("unknown /" + q.verb);
-        if (selected < int(hits.size())) {
-            const Node& n = g.nodes[hits[selected]];
-            toast("→ " + short_label(n.url) + " (depth " + std::to_string(n.depth) + ")");  // preview panel: S2
+        if (q.verb == "close") {
+            close_preview();
+            return set_omni(""), refresh_hits();
         }
+        if (!q.verb.empty()) return toast("unknown /" + q.verb);
+        if (selected < int(hits.size())) open_preview(g.nodes[hits[selected]]);
     };
 
     auto app = CatchEvent(view, [&](Event e) {
@@ -280,13 +380,17 @@ int tui_main(int argc, char** argv) {
             }
             return false;
         }
+        if (step == Step::Main) last_input = Clock::now();
         if (e == Event::Escape) {
+            // Main: Esc peels one layer: omnibar text, then coach, then preview, then quit.
             if (step == Step::Main && (bridges_shown || !omni_text.empty())) {
                 bridges_shown = false;
                 set_omni("");
                 refresh_hits();
                 return true;
             }
+            if (step == Step::Main && coach_step >= 0) return coach_step = -1, true;
+            if (step == Step::Main && pv_open) return close_preview(), true;
             screen.Exit();
             return true;
         }
@@ -343,6 +447,31 @@ int tui_main(int argc, char** argv) {
             refresh_hits();
             return true;
         }
+        // Coach: Tab steps through, past the last one closes it.
+        if (coach_step >= 0 && e == Event::Tab) {
+            if (++coach_step >= int(kCoach.size())) coach_step = -1;
+            return true;
+        }
+        // Camera + preview keys, only while the omnibar is empty (else they are typing).
+        bool empty = omni_text.empty() && !bridges_shown;
+        auto zoom = [&](double k) { cam_target.zoom = std::clamp(cam_target.zoom * k, 0.25, 16.0); };
+        double pan = 0.25 / cam_target.zoom;  // world units (ring = 1), same feel at any zoom
+        if (e.is_mouse() && e.mouse().button == Mouse::WheelUp) return zoom(1.25), true;
+        if (e.is_mouse() && e.mouse().button == Mouse::WheelDown) return zoom(1 / 1.25), true;
+        if (pv_open && e == Event::PageDown) return pv_scroll += 10, true;
+        if (pv_open && e == Event::PageUp) return pv_scroll = std::max(0, pv_scroll - 10), true;
+        if (empty) {
+            if (e == Event::Character('+') || e == Event::Character('=')) return zoom(1.25), true;
+            if (e == Event::Character('-')) return zoom(1 / 1.25), true;
+            if (e == Event::Character('0')) return cam_target = Camera{}, true;
+            if (e == Event::ArrowLeft) return cam_target.px += pan, true;
+            if (e == Event::ArrowRight) return cam_target.px -= pan, true;
+            if (e == Event::ArrowUp) return cam_target.py += pan, true;
+            if (e == Event::ArrowDown) return cam_target.py -= pan, true;
+            if (pv_open && e == Event::Character('j')) return ++pv_scroll, true;
+            if (pv_open && e == Event::Character('k')) return pv_scroll = std::max(0, pv_scroll - 1), true;
+            if (pv_open && e == Event::Character('m')) return pv_max = !pv_max, true;
+        }
         if (e == Event::ArrowUp) return selected = std::min(selected + 1, std::max(0, int(hits.size()) - 1)), true;  // results drop up
         if (e == Event::ArrowDown) return selected = std::max(selected - 1, 0), true;
         if (e == Event::Tab) {
@@ -364,6 +493,8 @@ int tui_main(int argc, char** argv) {
     screen.Loop(app);
     quitting = true;
     if (ticker.joinable()) ticker.join();
+    if (pv_busy) std::_Exit(0);  // a preview fetch is mid-network and holds `tls`
+    if (pv_worker.joinable()) pv_worker.join();
     if (worker.joinable()) {
         if (!crawl_done) std::_Exit(0);  // Esc mid-crawl: the worker still holds our fetchers
         worker.join();
