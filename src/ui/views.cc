@@ -258,4 +258,37 @@ Element coach(int step, int total, const std::string& t) {
            borderStyled(ROUNDED, th::kFaint);
 }
 
+int loading_rows(int term_h) {
+    // Rows taken by chrome: border 2, title 2, counters 1, rule 1, footer 1, breathing room 1.
+    return std::max(1, term_h - 8);
+}
+
+Element loading(const LoadingState& s, Element background) {
+    Color edge = Color::Interpolate(std::clamp(s.pulse, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+    static const char* spin[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    const Progress& p = s.progress;
+    auto count = [](const char* k, int v) {
+        return hbox({text(k) | color(th::kChrome), text(std::to_string(v) + " ") | bold | color(th::kText)});
+    };
+    Elements rows = {
+        hbox({text(" "), text(spin[s.tick % 10]) | color(th::kAccent), text(" " + s.line) | color(th::kText)}),
+        text("   crawling " + s.host) | color(th::kChrome),
+        hbox({count(" pages ", p.pages), count(" links ", p.links), count(" fail ", p.failed), count(" depth ", p.depth)}),
+        separatorLight() | color(th::kFaint),
+    };
+    // Checklist: newest at the bottom, brightest; older lines fade toward the chrome grey.
+    int n = int(p.recent.size());
+    for (int i = 0; i < n; ++i) {
+        const FetchLine& f = p.recent[size_t(i)];
+        Color c = i == n - 1 ? th::kText : i >= n - 3 ? Color::RGB(180, 180, 180) : th::kChrome;
+        rows.push_back(hbox({text(f.ok ? " ✓ " : " ✗ ") | color(f.ok ? th::kAccent : th::kChrome),
+                             text(short_label(f.url) + url_path(f.url)) | color(c)}));
+    }
+    // Fixed width (no wobble as longer labels land), every line clipped to it; border adds 2.
+    int w = std::clamp(s.cols - 4, 20, 62);
+    Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge);
+    Element content = vbox({filler(), hcenter(box), filler(), hcenter(text("Esc quit") | color(th::kChrome) | dim)}) | flex;
+    return dbox({std::move(background), std::move(content)});
+}
+
 }  // namespace wc::views

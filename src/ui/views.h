@@ -9,6 +9,7 @@
 
 #include "core/graph.h"
 #include "ui/layout.h"
+#include "ui/progress.h"
 #include "ui/replay.h"
 
 namespace wc::views {
@@ -34,5 +35,22 @@ ftxui::Element preview(const std::string& title, const std::vector<std::string>&
 
 // Onboarding coach mark: "1/3  text" + dim "Tab next · Esc skip".
 ftxui::Element coach(int step, int total, const std::string& text);
+
+// Crawl loading screen: spinner + rotating `line`, counters, then a checklist
+// of the fetches in p.recent (oldest first, so the newest sits at the bottom).
+// Give it `loading_rows(h)` fetches: as many as fit a terminal h rows tall.
+// pulse in [0,1] breathes the border (1 = bright; pass 1 with --no-anim).
+// `background` is drawn behind everything (hook for a later effect layer;
+// pass emptyElement() for none).
+struct LoadingState {
+    std::string host;   // short_label(start)
+    std::string line;   // loading_line(ms)
+    int tick = 0;       // spinner frame
+    float pulse = 1;
+    int cols = 80;      // terminal width: the box is min(64, cols - 2) wide
+    Progress progress;
+};
+int loading_rows(int term_h);
+ftxui::Element loading(const LoadingState& s, ftxui::Element background);
 
 }  // namespace wc::views

@@ -1,5 +1,5 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
-// URL -> Visualize? -> Max depth -> Max pages -> crawl (spinner) -> graph + omnibar.
+// URL -> Visualize? -> Max depth -> Max pages -> crawl (live loading screen) -> graph + omnibar.
 // Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow.
 // Graph keys (empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
 // Enter on a result opens its page preview (cache, else live fetch).
@@ -29,6 +29,7 @@
 #include "ui/layout.h"
 #include "ui/omni_query.h"
 #include "ui/osc52.h"
+#include "ui/progress.h"
 #include "ui/replay.h"
 #include "ui/theme.h"
 #include "ui/views.h"
@@ -49,13 +50,6 @@ const std::vector<std::string> kCoach = {
 };
 
 enum class Step { Url, Visualize, Depth, Pages, Crawling, Main, Summary };
-
-// Page path for the preview title: "https://a.org/x/y?q" -> "/x/y?q" ("/" if none).
-std::string url_path(const std::string& url) {
-    size_t s = url.find("://");
-    size_t p = url.find('/', s == std::string::npos ? 0 : s + 3);
-    return p == std::string::npos ? "/" : url.substr(p);
-}
 
 bool settled(const Camera& a, const Camera& b) {
     return std::abs(a.zoom - b.zoom) < 1e-3 && std::abs(a.px - b.px) < 1e-3 && std::abs(a.py - b.py) < 1e-3;
@@ -96,12 +90,6 @@ Element url_screen(const std::vector<std::string>& chips, Element input) {
 Element prompt_screen(const std::string& q, Element input) {
     return step_screen(hbox({text(q + "  ") | bold | color(th::kText), std::move(input) | size(WIDTH, EQUAL, 8)}),
                        "Enter accept default · Esc quit");
-}
-
-Element crawling_screen(const std::string& host, int tick) {
-    static const char* spin[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
-    return step_screen(hbox({text(spin[tick % 10]) | color(th::kAccent), text(" crawling " + host + " …") | color(th::kText)}),
-                       "Esc quit");
 }
 
 Element summary_screen(const CrawlGraph& g) {
@@ -157,12 +145,14 @@ int tui_main(int argc, char** argv) {
     tls.use_cache(&cache, false, false);
     tls.use_robots(true);
     RoutedFetcher routed(josh, tls);
+    ProgressTap tap(routed);  // the loading screen reads tap.snapshot(); g stays the worker's until done
     RealSleeper sleeper;
     std::string start;
     CrawlGraph g;
     std::thread worker, ticker;
     std::atomic<bool> crawl_done{false}, quitting{false};
     int tick = 0;
+    Clock::time_point crawl_t0;
 
     // Main screen state.
     Layout lay;
@@ -210,8 +200,9 @@ int tui_main(int argc, char** argv) {
     };
     auto start_crawl = [&] {
         step = Step::Crawling;
+        crawl_t0 = Clock::now();
         worker = std::thread([&] {
-            CrawlGraph r = crawl(start, cfg, routed, sleeper);
+            CrawlGraph r = crawl(start, cfg, tap, sleeper);
             screen.Post([&, r = std::move(r)]() mutable {
                 g = std::move(r);
                 crawl_done = true;
@@ -220,7 +211,7 @@ int tui_main(int argc, char** argv) {
         });
         ticker = std::thread([&] {
             while (!crawl_done && !quitting) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(80));  // ~12 fps loading screen
                 screen.PostEvent(Event::Custom);
             }
         });
@@ -341,15 +332,30 @@ int tui_main(int argc, char** argv) {
         return body;
     };
 
+    // Loading screen: spinner, rotating one-liner, live counters, a checklist of
+    // fetches as they land, border breathing over 1.6 s. Background layer empty for now.
+    auto crawling_screen = [&](Dimensions ts) -> Element {
+        int64_t ms = ms_since(crawl_t0);
+        views::LoadingState st;
+        st.host = short_label(start);
+        st.line = loading_line(ms);
+        st.tick = tick;
+        st.cols = ts.dimx;
+        st.pulse = no_anim ? 1.0f : float(0.5 + 0.5 * std::sin(ms / 1000.0 * 2 * M_PI / 1.6));
+        st.progress = tap.snapshot(size_t(views::loading_rows(ts.dimy)));
+        return views::loading(st, emptyElement());
+    };
+
     auto view = Renderer(inputs, [&]() -> Element {
         auto ts = Terminal::Size();
-        if (ts.dimx < 80 || ts.dimy < 24) return views::too_small(ts.dimx, ts.dimy);
+        // Only the graph needs the room: prompts, loading and summary fit a phone (~50 cols).
+        if (step == Step::Main && (ts.dimx < 80 || ts.dimy < 24)) return views::too_small(ts.dimx, ts.dimy);
         switch (step) {
             case Step::Url: return url_screen(chips, url_in->Render());
             case Step::Visualize: return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render());
             case Step::Depth: return prompt_screen("Max depth [3]", prompt_in->Render());
             case Step::Pages: return prompt_screen("Max pages [50]", prompt_in->Render());
-            case Step::Crawling: return crawling_screen(short_label(start), tick);
+            case Step::Crawling: return crawling_screen(ts);
             case Step::Summary: return summary_screen(g);
             case Step::Main: return main_screen();
         }
