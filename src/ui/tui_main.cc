@@ -35,6 +35,7 @@
 #include "ui/replay.h"
 #include "ui/theme.h"
 #include "ui/views.h"
+#include "ui/yes_no.h"
 
 namespace wc {
 
@@ -68,8 +69,7 @@ std::string seen_path() {
 
 std::string bridges_url() {
     if (const char* u = std::getenv("WC_BRIDGES_URL")) return u;
-    // TODO: real BRIDGES user/assignment once posting is wired.
-    return "https://bridges-cs.herokuapp.com/assignments/1/<user>";
+    return bridges_view_url(std::getenv("BRIDGES_ASSIGNMENT"), std::getenv("BRIDGES_USERNAME"));
 }
 
 // Centered prompt column: question, the live input, a dim footer.
@@ -84,14 +84,14 @@ Element url_screen(const std::vector<std::string>& chips, Element input) {
     for (const auto& c : chips) {
         chip_row.push_back(text("[ " + short_label(c) + " ✕ ] ") | color(th::kAccent));
     }
-    return step_screen(vbox({hbox(std::move(chip_row)), hbox({text("› ") | bold | color(th::kAccent),
-                                                                 std::move(input) | size(WIDTH, EQUAL, 50)})}),
+    return step_screen(vbox({hbox(std::move(chip_row)),
+                             views::input_box(hbox({text("› ") | bold | color(th::kAccent),
+                                                    std::move(input) | size(WIDTH, EQUAL, 50)}))}),
                        "Enter crawl · Tab add URL · Esc quit");
 }
 
-Element prompt_screen(const std::string& q, Element input) {
-    return step_screen(hbox({text(q + "  ") | bold | color(th::kText), std::move(input) | size(WIDTH, EQUAL, 8)}),
-                       "Enter accept default · Esc quit");
+Element prompt_screen(const std::string& q, Element input, const std::string& footer = "Enter accept default · Esc quit") {
+    return step_screen(hbox({text(q + "  ") | bold | color(th::kText), views::input_box(std::move(input) | size(WIDTH, EQUAL, 8))}), footer);
 }
 
 Element summary_screen(const CrawlGraph& g) {
@@ -313,11 +313,12 @@ int tui_main(int argc, char** argv) {
         }
         std::string ghost = complete(omni_text);
         ghost = ghost.size() > omni_text.size() ? ghost.substr(omni_text.size()) : "";
-        if (omni_text.empty()) ghost = "type to search \u00b7 /bridges";
+        if (omni_text.empty()) ghost = "Type to find a page.\nExample: " + example_label(g);
 
+        int extra = ghost.find('\n') != std::string::npos;  // 2-line placeholder: one more row in the box
         // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar (2) + omnibar (3 + results).
         auto ts = Terminal::Size();
-        int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()));
+        int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()) - extra);
         View v = apply(cam, fit(lay, ts.dimx * 2, rows_left * 4), ts.dimx * 2, rows_left * 4);
 
         Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
@@ -333,7 +334,7 @@ int tui_main(int argc, char** argv) {
         if (!pv_open && coach_step >= 0 && coach_step < int(kCoach.size())) {  // never over the preview
             Element c = views::coach(coach_step + 1, int(kCoach.size()), kCoach[coach_step]);
             body = dbox({body, vbox({filler(), hbox({filler(), c, filler()}),
-                                     emptyElement() | size(HEIGHT, EQUAL, 3 + int(rows.size()))})});
+                                     emptyElement() | size(HEIGHT, EQUAL, 3 + extra + int(rows.size()))})});
         }
         if (toast_live)
             body = dbox({body, vbox({hbox({filler(), views::toast(toast_text)}), filler()})});
@@ -366,7 +367,9 @@ int tui_main(int argc, char** argv) {
         if (step == Step::Main && (ts.dimx < 80 || ts.dimy < 24)) return views::too_small(ts.dimx, ts.dimy);
         switch (step) {
             case Step::Url: return url_screen(chips, url_in->Render());
-            case Step::Visualize: return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render());
+            case Step::Visualize:
+                return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render(),
+                                     "y yes · n no · Enter default · Esc quit");
             case Step::Depth: return prompt_screen("Max depth [3]", prompt_in->Render());
             case Step::Pages: return prompt_screen("Max pages [50]", prompt_in->Render());
             case Step::Crawling: return crawling_screen(ts);
@@ -390,6 +393,12 @@ int tui_main(int argc, char** argv) {
         }
         if (!q.verb.empty()) return toast("unknown /" + q.verb);
         if (selected < int(hits.size())) open_preview(g.nodes[hits[selected]]);
+    };
+
+    // Every yes/no prompt goes through this: Event -> yes_no_answer (src/ui/yes_no.h).
+    auto yes_no_key = [](const Event& e, bool default_yes) {
+        char k = e == Event::Return ? '\n' : e.is_character() && e.input().size() == 1 ? e.input()[0] : 0;
+        return yes_no_answer(k, default_yes);
     };
 
     auto app = CatchEvent(view, [&](Event e) {
@@ -434,12 +443,11 @@ int tui_main(int argc, char** argv) {
                 }
                 return false;
             case Step::Visualize:
-                if (e == Event::Return) {
-                    if (!prompt_text.empty()) visualize = prompt_text[0] == 'y' || prompt_text[0] == 'Y';
+                if (auto a = yes_no_key(e, first_run)) {  // y/n answers at once, Enter = default
+                    visualize = *a;
                     begin_prompt(Step::Depth, "");
-                    return true;
                 }
-                return false;
+                return true;  // other keys are not typed into the box
             case Step::Depth:
                 if (e == Event::Return) {
                     cfg.maxDepth = int_or(prompt_text, 3);

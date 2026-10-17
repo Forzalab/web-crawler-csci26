@@ -74,6 +74,10 @@ step() {  # step <keys-literal> <next-screen-regex>: type, Enter, wait for the n
     T send-keys -t "$sess" Enter
     if [ "$small" = 1 ]; then sleep 0.4; else wait_for "$2" 5 || true; fi
 }
+answer() {  # answer <key> <next-screen-regex>: yes/no prompts take the key at once, no Enter
+    T send-keys -t "$sess" -l -- "$1"
+    if [ "$small" = 1 ]; then sleep 0.4; else wait_for "$2" 5 || true; fi
+}
 pages_of() {  # "PAGES 30/30 LIMIT" from the boss bar (row 1), meter glyphs dropped
     head -n 1 <<< "$1" | grep -oE 'DEPTH [0-9]+/[0-9]+|PAGES [0-9]+/[0-9]+|LIMIT' | paste -sd' ' -
 }
@@ -117,7 +121,7 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
         frame "url"
         T send-keys -t "$sess" -l -- "$url"
         step "" 'Visualize'
-        step "y" 'Max depth'
+        answer "y" 'Max depth'
         step "$depth" 'Max pages'
         step "$size" 'crawling|DEPTH'
         t_crawl=$(now)

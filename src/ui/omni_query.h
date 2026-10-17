@@ -31,4 +31,12 @@ std::vector<int> match(const CrawlGraph& g, const Query& q, size_t limit = 8);
 // empty if none.
 std::string complete(const std::string& line);
 
+// Where a BRIDGES graph is viewed: <server>/assignments/<N>/<user>. Null/empty
+// assignment or user -> the literal "<N>" / "<user>". Never touches API keys.
+std::string bridges_view_url(const char* assignment, const char* user);
+
+// A real page from the graph to show as the omnibar example: a depth-1 node's
+// short label, else the start page, else "google.com" (empty graph).
+std::string example_label(const CrawlGraph& g);
+
 }  // namespace wc
