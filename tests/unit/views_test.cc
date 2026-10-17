@@ -260,6 +260,46 @@ static void test_coach() {
     CHECK_HAS(out, "╭");
 }
 
+static void test_loading() {
+    views::LoadingState st;
+    st.host = "iana.org";
+    st.line = "untangling the web…";
+    st.tick = 3;
+    st.pulse = 0.5f;
+    st.progress.pages = 3, st.progress.ok = 2, st.progress.failed = 1, st.progress.links = 40, st.progress.depth = 1;
+    st.progress.recent = {{"https://www.iana.org/", 0, true}, {"https://www.iana.org/domains", 1, true},
+                          {"https://ext.com/very/long/path/that/goes/on/and/on/and/on/forever/more", 1, false}};
+    std::string out = render(views::loading(st, emptyElement()), 80, 24);
+    CHECK_HAS(out, "⠸ untangling the web…");
+    CHECK_HAS(out, "crawling iana.org");
+    CHECK_HAS(out, "pages 3");
+    CHECK_HAS(out, "links 40");
+    CHECK_HAS(out, "fail 1");
+    CHECK_HAS(out, "depth 1");
+    CHECK_HAS(out, "✓ iana.org/");
+    CHECK_HAS(out, "✓ iana.org/domains");
+    CHECK_HAS(out, "✗ ext.com/very/long");
+    CHECK_HAS(out, "Esc quit");
+    CHECK_HAS(out, "╭");
+    // Newest at the bottom, and the long line is clipped to the box (<= 64 inside the border).
+    CHECK(out.find("✓ iana.org/domains") < out.find("✗ ext.com"), out);
+    CHECK_LACKS(out, "more/and");
+    // Phone width: nothing wraps, every row still there.
+    st.cols = 50;
+    out = render(views::loading(st, emptyElement()), 50, 20);
+    CHECK_HAS(out, "untangling the web…");
+    CHECK_HAS(out, "✗ ext.com");
+    CHECK_HAS(out, "Esc quit");
+    size_t tl = out.find("╭");
+    CHECK(tl != std::string::npos && out.find("╮", tl) < out.find('\n', tl), out);  // right edge on screen
+    st.cols = 80;
+    // The background layer sits behind the content.
+    out = render(views::loading(st, text("BACKDROP") | size(WIDTH, EQUAL, 80)), 80, 24);
+    CHECK_HAS(out, "BACKDROP");
+    CHECK(views::loading_rows(40) == 32, "loading_rows(40)");
+    CHECK(views::loading_rows(5) == 1, "loading_rows(5)");
+}
+
 static void dump_main() {
     Fake k = fake_graph();
     View v{36, 110, 24};
@@ -283,6 +323,7 @@ int main() {
     test_toast_too_small();
     test_preview();
     test_coach();
+    test_loading();
     if (std::getenv("WC_VIEWS_DUMP")) dump_main();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << "\n";
     return failures ? 1 : 0;
