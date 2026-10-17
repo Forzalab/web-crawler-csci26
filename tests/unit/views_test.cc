@@ -1,6 +1,7 @@
 // views_test.cc - headless renders of src/ui/views (state in, Element out).
 // Run: NO_COLOR=1 build/wc_views_test   (exit 1 if any check fails)
 // WC_VIEWS_DUMP=1 also prints a 100x30 main screen for eyeballing.
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -9,6 +10,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
+#include "ui/matrix.h"
 #include "ui/theme.h"
 #include "ui/views.h"
 
@@ -296,6 +298,42 @@ static void test_loading() {
     // The background layer sits behind the content.
     out = render(views::loading(st, text("BACKDROP") | size(WIDTH, EQUAL, 80)), 80, 24);
     CHECK_HAS(out, "BACKDROP");
+    // Matrix rain behind it (glyphs forced: this test runs under NO_COLOR): the rain
+    // shows around the box, but the box is opaque, so every text row reads clean.
+    for (auto [w, h] : {std::pair{120, 40}, std::pair{50, 40}}) {
+        st.cols = w;
+        matrix::MatrixRain rain(0x5eedu, matrix::Glyphs::Ascii);
+        rain.set_frame(500);
+        out = render(views::loading(st, rain.render(matrix::kGreenDim) | flex), w, h);
+        CHECK_HAS(out, "│ ⠸ untangling the web…");
+        CHECK_HAS(out, "│   crawling iana.org ");
+        CHECK_HAS(out, "│ pages 3  links 40  fail 1  depth 1 ");
+        CHECK_HAS(out, "│ ✓ iana.org/domains ");
+        CHECK_HAS(out, "Esc quit");
+        size_t top = out.find("╭");
+        CHECK(top != std::string::npos && out.substr(0, top).find_first_not_of(" \n") != std::string::npos, out);
+        // Every box row (border to border) is byte-identical to the render with no background.
+        std::string plain = render(views::loading(st, emptyElement()), w, h);
+        auto box_rows = [](const std::string& s) {
+            std::vector<std::string> rows;
+            size_t at = 0;
+            while (at < s.size()) {
+                size_t nl = s.find('\n', at);
+                if (nl == std::string::npos) nl = s.size();
+                std::string line = s.substr(at, nl - at);
+                size_t l = std::string::npos, r = 0;
+                for (const char* e : {"│", "├", "╭", "╰"}) l = std::min(l, line.find(e));
+                for (const char* e : {"│", "┤", "╮", "╯"})
+                    if (size_t k = line.rfind(e); k != std::string::npos) r = std::max(r, k + 3);
+                if (l != std::string::npos && r > l) rows.push_back(line.substr(l, r - l));
+                at = nl + 1;
+            }
+            return rows;
+        };
+        auto with_rain = box_rows(out), without = box_rows(plain);
+        CHECK(with_rain.size() >= 9 && with_rain == without, out + "\n---\n" + plain);
+    }
+    st.cols = 80;
     CHECK(views::loading_rows(40) == 32, "loading_rows(40)");
     CHECK(views::loading_rows(5) == 1, "loading_rows(5)");
 }

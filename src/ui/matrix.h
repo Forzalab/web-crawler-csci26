@@ -26,6 +26,8 @@ enum class Glyphs { Unicode, Ascii, Off };
 Glyphs detect_glyphs();
 
 inline const ftxui::Color kGreen = ftxui::Color::RGB(0, 255, 70);
+// Behind text (loading screen): dark enough that content painted over it stays readable.
+inline const ftxui::Color kGreenDim = ftxui::Color::RGB(0, 110, 35);
 
 // level: 0 empty, 1 faint tail, 2 mid tail, 3 bright tail, 4 head.
 struct RainCell {

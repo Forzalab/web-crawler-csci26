@@ -159,6 +159,7 @@ int tui_main(int argc, char** argv) {
     std::thread worker, ticker;
     std::atomic<bool> crawl_done{false}, quitting{false};
     int tick = 0;
+    matrix::MatrixRain rain;  // loading-screen backdrop, one frame per ticker tick
     Clock::time_point crawl_t0;
 
     // Main screen state.
@@ -340,7 +341,8 @@ int tui_main(int argc, char** argv) {
     };
 
     // Loading screen: spinner, rotating one-liner, live counters, a checklist of
-    // fetches as they land, border breathing over 1.6 s. Background layer empty for now.
+    // fetches as they land, border breathing over 1.6 s. Behind it: dim green matrix
+    // rain (none under --no-anim / NO_COLOR; orange is reserved for advanced mode).
     auto crawling_screen = [&](Dimensions ts) -> Element {
         int64_t ms = ms_since(crawl_t0);
         views::LoadingState st;
@@ -350,7 +352,12 @@ int tui_main(int argc, char** argv) {
         st.cols = ts.dimx;
         st.pulse = no_anim ? 1.0f : float(0.5 + 0.5 * std::sin(ms / 1000.0 * 2 * M_PI / 1.6));
         st.progress = tap.snapshot(size_t(views::loading_rows(ts.dimy)));
-        return views::loading(st, emptyElement());
+        Element bg = emptyElement();
+        if (!no_anim) {
+            rain.resize(ts.dimx, ts.dimy);
+            bg = rain.render(matrix::kGreenDim) | flex;
+        }
+        return views::loading(st, std::move(bg));
     };
 
     auto view = Renderer(inputs, [&]() -> Element {
@@ -389,6 +396,7 @@ int tui_main(int argc, char** argv) {
         if (e == Event::Custom) {
             if (step == Step::Crawling) {
                 ++tick;
+                rain.tick();
                 if (crawl_done) finish_crawl();
             }
             return false;
