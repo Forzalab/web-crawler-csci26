@@ -11,12 +11,13 @@ all:
 unit: all
 	$(BUILD)/wc_net_test
 	$(BUILD)/wc_graph_test
+	$(BUILD)/wc_crawl_test
 	$(BUILD)/wc_ui_test
 	$(BUILD)/wc_query_test
 	NO_COLOR=1 $(BUILD)/wc_views_test
 	$(BUILD)/test_bridges_json tests/bridges/golden
 
-# BFS empty-queue regression (fails until src/core/crawl.cc is patched; then move into unit)
+# BFS empty-queue regression only (also part of `make unit`)
 crawl-regress: all
 	$(BUILD)/wc_crawl_test
 
