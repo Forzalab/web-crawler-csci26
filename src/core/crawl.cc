@@ -146,23 +146,21 @@ CrawlGraph& Crawler::crawl_bfs(const std::string& root_url, CrawlConfig cfg, Lin
         
         auto& children_vec = *children;
         for (const auto& child_url : children_vec) {
-            if (cfg.__size >= cfg.maxSize) break;
-            
             bool seen_edge = g.has_edge(url, child_url);
             bool seen_node = g.has(child_url);
 
+            if (cfg.__size >= cfg.maxSize && !seen_node) continue; //only concern nodes
+            
             // edge
             if (!seen_edge)
                 g.add_edge(url, child_url, seen_node);
-
+                            
             // node
-            if (seen_node) { // ezisting
-            }
-            else if (!seen_node) { // fresh
-                g.add_node(child_url, root_node.depth + 1);
-                todo.push_back(child_url);
-                cfg.__size++;
-            }
+            if (seen_node) continue; // dont add ezisting nodes
+
+            g.add_node(child_url, root_node.depth + 1);
+            todo.push_back(child_url);
+            cfg.__size++;
         }
 
         // endloop incr
