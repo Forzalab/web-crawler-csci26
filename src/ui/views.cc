@@ -186,6 +186,11 @@ Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_de
     });
 }
 
+Element input_box(Element input) {
+    // White on black incl. the border; NO_COLOR keeps border + plain text.
+    return std::move(input) | color(Color::White) | borderStyled(ROUNDED, th::kAccent) | bgcolor(Color::Black);
+}
+
 Element omnibar(Element input, const std::vector<std::string>& results, int selected,
                 const std::string& ghost) {
     Elements rows;
@@ -197,13 +202,12 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
         else
             rows.push_back(hbox({text("  " + results[i]) | color(th::kChrome), filler()}));
     }
-    rows.push_back(hbox({
-                       text("› ") | bold | color(th::kAccent),
-                       std::move(input),
-                       text(ghost) | color(th::kChrome),
-                       filler(),
-                   }) |
-                   borderStyled(ROUNDED, th::kAccent));
+    // Ghost: first line trails the input; further lines (placeholder) sit dim inside the box.
+    std::string first = ghost.substr(0, ghost.find('\n'));
+    Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input), text(first) | color(th::kChrome), filler()})};
+    for (size_t p = ghost.find('\n'); p != std::string::npos; p = ghost.find('\n', p + 1))
+        box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome) | dim);
+    rows.push_back(input_box(vbox(std::move(box))));
     // Centred column, <= 60 cols and <= half the screen; results share it.
     return std::make_shared<CenterCap>(vbox(std::move(rows)), 60);
 }

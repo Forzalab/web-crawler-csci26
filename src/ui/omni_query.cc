@@ -1,5 +1,6 @@
 // omni_query.cc - see omni_query.h
 #include "ui/omni_query.h"
+#include "ui/layout.h"
 
 #include <algorithm>
 #include <cctype>
@@ -105,6 +106,17 @@ std::string complete(const std::string& line) {
     }
     if (starts_with("depth:", tok) && tok != "depth:") return head + "depth:";
     return "";
+}
+
+std::string bridges_view_url(const char* assignment, const char* user) {
+    return std::string("http://assignments.bridgesuncc.org/assignments/") + (assignment && *assignment ? assignment : "<N>") +
+           "/" + (user && *user ? user : "<user>");
+}
+
+std::string example_label(const CrawlGraph& g) {
+    for (const auto& n : g.nodes)
+        if (n.depth == 1) return short_label(n.url);
+    return g.nodes.empty() ? "google.com" : short_label(g.nodes[0].url);
 }
 
 }  // namespace wc

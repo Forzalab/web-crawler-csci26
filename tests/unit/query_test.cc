@@ -1,9 +1,11 @@
-// query_test.cc - unit tests for src/ui/omni_query + src/ui/osc52.
+// query_test.cc - unit tests for src/ui/omni_query + src/ui/osc52 + src/ui/yes_no.
 // Run: build/wc_query_test   (exit 1 if any check fails)
 #include <iostream>
 
+#include "ui/layout.h"
 #include "ui/omni_query.h"
 #include "ui/osc52.h"
+#include "ui/yes_no.h"
 
 using namespace wc;
 
@@ -111,7 +113,34 @@ static void test_osc52() {
     CHECK_EQ(osc52(""), std::string("\x1b]52;c;\x07"));
 }
 
+static int yn(char c, bool def) {  // -1 = ignored, else 0/1
+    auto r = yes_no_answer(c, def);
+    return r ? int(*r) : -1;
+}
+
+static void test_yes_no() {
+    for (char c : {'y', 'Y'}) CHECK_EQ(yn(c, false), 1);  // no Enter needed
+    for (char c : {'n', 'N'}) CHECK_EQ(yn(c, true), 0);
+    CHECK_EQ(yn('\n', true), 1);  // Enter = default
+    CHECK_EQ(yn('\n', false), 0);
+    CHECK_EQ(yn('x', true), -1);  // anything else is ignored
+    CHECK_EQ(yn(0, false), -1);
+}
+
+static void test_bridges_url_example() {
+    CHECK_EQ(bridges_view_url("7", "tony"), std::string("http://assignments.bridgesuncc.org/assignments/7/tony"));
+    CHECK_EQ(bridges_view_url(nullptr, ""), std::string("http://assignments.bridgesuncc.org/assignments/<N>/<user>"));
+    CrawlGraph g;
+    CHECK_EQ(example_label(g), std::string("google.com"));
+    g.nodes.push_back({"https://example.com/", 0});
+    CHECK_EQ(example_label(g), short_label("https://example.com/"));
+    g.nodes.push_back({"https://example.com/docs", 1});
+    CHECK_EQ(example_label(g), short_label("https://example.com/docs"));
+}
+
 int main() {
+    test_bridges_url_example();
+    test_yes_no();
     test_parse();
     test_match();
     test_complete();

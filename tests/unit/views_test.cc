@@ -216,6 +216,40 @@ static void test_omnibar() {
     CHECK((b - a - 3) / 3 + 2 == 60, out);  // UTF-8 ─ is 3 bytes
 }
 
+// Omnibar = white text on a black background, with a border. Colours are checked on the
+// Screen cells; the NO_COLOR render (plain text) must still show border + text.
+static void test_omnibar_placeholder() {
+    std::string out = render(views::omnibar(text(""), {}, -1, "Type to find a page.\nExample: example.com"), 80, 4);
+    CHECK_HAS(out, "› Type to find a page.");
+    CHECK_HAS(out, "Example: example.com");
+    CHECK(out.find("Type to find") < out.find("Example"), out);
+    CHECK(out.find("Example") < out.find("╰"), out);  // inside the box
+}
+
+static void test_omnibar_colors() {
+    auto bar = views::omnibar(text("goo"), {}, -1, "");
+    Screen s = Screen::Create(Dimension::Fixed(80), Dimension::Fixed(3));
+    Render(s, bar);
+    int x = 0;  // first cell of "goo" on the input row (middle row)
+    for (; x < 80 && s.PixelAt(x, 1).character != "g"; ++x) {}
+    CHECK(x < 80, s.ToString());
+    CHECK(s.PixelAt(x, 1).background_color == Color::Black, s.ToString());
+    CHECK(s.PixelAt(x, 1).foreground_color == Color::White, s.ToString());
+    CHECK(s.PixelAt(x, 0).background_color == Color::Black, s.ToString());  // border row too
+    std::string out = render(views::omnibar(text("goo"), {}, -1, ""), 80, 3);
+    CHECK_HAS(out, "│› goo");
+    CHECK_HAS(out, "╰");
+    // any other input gets the same shared style (URL bar / prompts)
+    std::string url = render(views::input_box(text("example.com")), 30, 3);
+    CHECK_HAS(url, "╭");
+    CHECK_HAS(url, "│example.com");
+    CHECK_HAS(url, "╰");
+    Screen s2 = Screen::Create(Dimension::Fixed(30), Dimension::Fixed(3));
+    Render(s2, views::input_box(text("50")));
+    CHECK(s2.PixelAt(1, 1).background_color == Color::Black, s2.ToString());
+    CHECK(s2.PixelAt(1, 1).foreground_color == Color::White, s2.ToString());
+}
+
 static void test_toast_too_small() {
     std::string out = render(views::toast("Copied 12 URLs"), 30, 3);
     CHECK_HAS(out, "✓ Copied 12 URLs");
@@ -399,6 +433,8 @@ int main() {
     test_seen_edges_cap();
     test_boss_bar();
     test_omnibar();
+    test_omnibar_colors();
+    test_omnibar_placeholder();
     test_toast_too_small();
     test_preview();
     test_coach();
