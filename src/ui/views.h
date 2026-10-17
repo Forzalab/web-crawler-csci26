@@ -27,4 +27,12 @@ ftxui::Element omnibar(ftxui::Element input, const std::vector<std::string>& res
 ftxui::Element toast(const std::string& text);   // corner overlay, dbox it on top
 ftxui::Element too_small(int w, int h);          // < 80x24 guard
 
+// Floating page preview. glow in [0,1] = focus pulse phase (orange border
+// brightness); lines from html_to_lines; "# " lines render as headings.
+ftxui::Element preview(const std::string& title, const std::vector<std::string>& lines,
+                       int scroll, float glow, bool maximized);
+
+// Onboarding coach mark: "1/3  text" + dim "Tab next · Esc skip".
+ftxui::Element coach(int step, int total, const std::string& text);
+
 }  // namespace wc::views
