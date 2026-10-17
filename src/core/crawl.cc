@@ -112,10 +112,19 @@ CrawlGraph& Crawler::crawl_bfs(const std::string& root_url, CrawlConfig cfg, Lin
     std::string url = root_url;
     todo.push_back(url);    
     
-    while (!todo.empty() && cfg.__depth < cfg.maxDepth && cfg.__size <= cfg.maxSize) {
+    while (!todo.empty() && cfg.__size <= cfg.maxSize) {
         // ---- processing section ----
-        cfg.__depth++; // one iteration is ONE DEPTH.        
+        // READ THE ACTUAL DEPTH OF EACH NODE, FUCKER
         todo.pop_front();
+
+        int id = g.id_of(url);
+        auto root_node = g.nodes[id];
+        
+        if (root_node.depth >= cfg.maxDepth) {
+            processed.insert({url, true});
+            url = todo.front();
+            continue;
+        }
         
         auto children = src.links(url);
 
@@ -145,7 +154,7 @@ CrawlGraph& Crawler::crawl_bfs(const std::string& root_url, CrawlConfig cfg, Lin
             if (seen_node) { // ezisting
             }
             else if (!seen_node) { // fresh
-                g.add_node(child_url, cfg.__depth);
+                g.add_node(child_url, root_node.depth + 1);
                 todo.push_back(child_url);
             }
         }
