@@ -15,7 +15,9 @@ root=$PWD
 BIN=${BIN:-build/wc}
 OUT=${OUT:-build/smoke/tear}
 for t in tmux strace python3; do
-    command -v $t > /dev/null || { echo "tear_check: SKIP ($t not installed)"; exit 0; }
+    command -v $t > /dev/null || { echo "tear_check: SKIP ($t not installed)"
+        [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "**Tear check: SKIP** ($t not installed)" >> "$GITHUB_STEP_SUMMARY"
+        exit 0; }
 done
 [ -x "$BIN" ] || { echo "no binary at $BIN (run make first)"; exit 2; }
 rm -rf "$OUT" && mkdir -p "$OUT" && OUT=$(cd "$OUT" && pwd)
@@ -98,4 +100,7 @@ echo "tear check (raw stdout writes, $BIN)"
 run tear_120x40 120 40 esc
 run tear_60x30 60 30 esc
 run tear_ctrlc 120 40 ctrlc
-[ "$fails" -eq 0 ] && echo "TEAR CHECK: PASS" || { echo "TEAR CHECK: $fails FAIL ($OUT)"; exit 1; }
+[ "$fails" -eq 0 ] && verdict="PASS" || verdict="$fails FAIL ($OUT)"
+echo "TEAR CHECK: $verdict"
+[ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "**Tear check: $verdict**" >> "$GITHUB_STEP_SUMMARY"
+[ "$fails" -eq 0 ] || exit 1
