@@ -19,6 +19,7 @@ struct FetchLine {
     std::string url;
     int depth = 0;
     bool ok = false;
+    int64_t at_ms = 0;  // anim::now_ms() when it landed (drives the checklist fade-in)
 };
 
 struct Progress {

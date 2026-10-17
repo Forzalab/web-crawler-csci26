@@ -296,6 +296,46 @@ static void test_coach() {
     CHECK_HAS(out, "╭");
 }
 
+// Foreground colour of the cell where `needle` starts (first row that holds it).
+static Color fg_of(Element e, const std::string& needle, int w = 80, int h = 24) {
+    auto s = Screen::Create(Dimension::Fixed(w), Dimension::Fixed(h));
+    Render(s, e);
+    for (int y = 0; y < h; ++y) {
+        std::string row;
+        std::vector<int> col_of;  // byte -> x
+        for (int x = 0; x < w; ++x) {
+            for (size_t k = 0; k < s.CellAt(x, y).character.size(); ++k) col_of.push_back(x);
+            row += s.CellAt(x, y).character;
+        }
+        if (size_t at = row.find(needle); at != std::string::npos) return s.CellAt(col_of[at], y).foreground_color;
+    }
+    return Color::Default;
+}
+
+static void test_loading_fade(views::LoadingState st) {
+    st.progress.recent = {{"https://a.org/old", 0, true, 1000}, {"https://b.org/mid", 1, true, 2000},
+                          {"https://c.org/new", 1, true, 3000}};
+    const Color kMid = Color::RGB(180, 180, 180);  // the two lines above the newest
+    auto at = [&](int64_t now, const char* who, int rows = 0) {
+        views::LoadingState s = st;
+        s.fade = true, s.now_ms = now, s.rows = rows;
+        return fg_of(views::loading(s, emptyElement()), who);
+    };
+    // Newest line: faint when it lands, full white after the 400 ms fade, in between mid-way.
+    CHECK(at(3000, "c.org/new") == theme::kFaint, "fade-in starts faint");
+    CHECK(at(3400, "c.org/new") == theme::kText, "fade-in ends at full colour");
+    CHECK(at(3200, "c.org/new") != theme::kFaint && at(3200, "c.org/new") != theme::kText, "mid fade");
+    // List not full: the oldest line keeps its grey; full (rows == 3): it fades out to faint.
+    CHECK(at(3400, "a.org/old") == kMid, "not full: oldest keeps its grey");
+    CHECK(at(3400, "a.org/old", 3) == theme::kFaint, "full: oldest faded out before it scrolls");
+    CHECK(at(3000, "a.org/old", 3) == kMid, "fade-out starts when the newest lands");
+    // fade off (--no-anim / NO_COLOR): final colours at once, whatever the clock says.
+    st.fade = false;
+    CHECK(fg_of(views::loading(st, emptyElement()), "c.org/new") == theme::kText, "no-anim: static");
+    st.rows = 3;
+    CHECK(fg_of(views::loading(st, emptyElement()), "a.org/old") == kMid, "no-anim: no fade-out");
+}
+
 static void test_loading() {
     views::LoadingState st;
     st.host = "iana.org";
@@ -368,6 +408,7 @@ static void test_loading() {
         CHECK(with_rain.size() >= 9 && with_rain == without, out + "\n---\n" + plain);
     }
     st.cols = 80;
+    test_loading_fade(st);
     CHECK(views::loading_rows(40) == 32, "loading_rows(40)");
     CHECK(views::loading_rows(5) == 1, "loading_rows(5)");
 }

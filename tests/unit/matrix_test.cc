@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <string>
 
 #include <ftxui/dom/elements.hpp>
@@ -157,6 +158,87 @@ static void test_sparse_and_alive() {
     CHECK(heads > 0, "no heads");
 }
 
+static long lit_cells(MatrixRain& r, int w, int h, std::set<int>* cols = nullptr) {
+    long lit = 0;
+    for (uint64_t f = 0; f < 200; f += 10) {
+        r.set_frame(f);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                if (r.cell(x, y).level) {
+                    ++lit;
+                    if (cols) cols->insert(x);
+                }
+    }
+    return lit;
+}
+
+static void test_intensity() {
+    const int w = 120, h = 40;
+    // Default is 1.0, and 1.0 is exactly today's rain (cell for cell).
+    MatrixRain def(2026, Glyphs::Unicode), one(2026, Glyphs::Unicode);
+    CHECK(def.intensity() == 1.0f, std::to_string(def.intensity()));
+    one.set_intensity(1.0f);
+    def.resize(w, h), one.resize(w, h);
+    bool same = true;
+    for (uint64_t f : {0ull, 13ull, 250ull, 9999ull}) {
+        def.set_frame(f), one.set_frame(f);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                RainCell a = def.cell(x, y), b = one.cell(x, y);
+                RainCell c = cell_at(2026, f, x, y, h, Glyphs::Unicode);  // old signature
+                same &= a.level == b.level && a.glyph == b.glyph && a.level == c.level && a.glyph == c.glyph;
+            }
+    }
+    CHECK(same, "intensity 1 must equal the default rain");
+    one.set_intensity(-2.0f);
+    CHECK(one.intensity() == 0.0f, "clamp low");
+    one.set_intensity(5.0f);
+    CHECK(one.intensity() == 1.0f, "clamp high");
+
+    // 0 -> sparse: a few columns, far fewer lit cells; columns only join as it rises.
+    std::set<int> cols0, cols1;
+    MatrixRain r(2026, Glyphs::Unicode);
+    r.resize(w, h);
+    r.set_intensity(0.0f);
+    long lit0 = lit_cells(r, w, h, &cols0);
+    r.set_intensity(1.0f);
+    long lit1 = lit_cells(r, w, h, &cols1);
+    CHECK(lit0 > 0, "intensity 0 still shows something");
+    CHECK(cols0.size() >= 1 && cols0.size() <= 16, std::to_string(cols0.size()) + " columns at 0");
+    CHECK(lit0 * 8 < lit1, std::to_string(lit0) + " vs " + std::to_string(lit1));
+    long prev = 0;
+    bool grows = true;
+    for (float i : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        r.set_intensity(i);
+        std::set<int> c;
+        lit_cells(r, w, h, &c);
+        grows &= long(c.size()) >= prev;
+        prev = long(c.size());
+    }
+    CHECK(grows, "active columns never shrink as intensity rises");
+    // Glyph variety: fewer distinct glyphs at 0.
+    auto variety = [&](float i) {
+        std::set<std::string> gl;
+        r.set_intensity(i);
+        for (uint64_t f = 0; f < 400; f += 5) {
+            r.set_frame(f);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    if (const char* g = r.cell(x, y).glyph) gl.insert(g);
+        }
+        return gl.size();
+    };
+    size_t v0 = variety(0.0f), v1 = variety(1.0f);
+    CHECK(v0 <= 16 && v1 > 3 * v0, std::to_string(v0) + " vs " + std::to_string(v1));
+    // Deterministic at any intensity: pure function of (seed, frame, intensity).
+    for (float i : {0.0f, 0.37f, 0.8f}) {
+        MatrixRain a(7, Glyphs::Ascii), b(7, Glyphs::Ascii);
+        a.set_intensity(i), b.set_intensity(i);
+        a.set_frame(321), b.set_frame(321);
+        CHECK(render(a.render(), 60, 20) == render(b.render(), 60, 20), "deterministic at " + std::to_string(i));
+    }
+}
+
 static void test_off_and_detect() {
     MatrixRain off(1, Glyphs::Off);
     off.resize(30, 10);
@@ -184,6 +266,7 @@ int main() {
     test_resize_safety();
     test_no_out_of_bounds();
     test_sparse_and_alive();
+    test_intensity();
     test_off_and_detect();
     if (std::getenv("WC_MATRIX_DUMP")) std::cout << rain_at(1, 300, 60, 16, Glyphs::Unicode) << "\n";
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << " matrix checks\n";

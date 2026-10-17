@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "core/graph.h"
+#include "ui/anim.h"
 #include "ui/camera.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
@@ -152,6 +153,89 @@ static void test_replay() {
     CHECK_EQ(m.node_t[4], 0.5f);
 }
 
+static void test_anim() {
+    using namespace wc::anim;
+    // Endpoints exact, clamped outside [0,1], monotonic in between.
+    for (auto fn : {ease_in, ease_out, smoothstep}) {
+        CHECK_EQ(fn(0.0), 0.0);
+        CHECK_EQ(fn(1.0), 1.0);
+        CHECK_EQ(fn(-3.0), 0.0);
+        CHECK_EQ(fn(7.0), 1.0);
+        bool mono = true;
+        for (int i = 1; i <= 100; ++i) mono = mono && fn(i / 100.0) >= fn((i - 1) / 100.0);
+        CHECK_EQ(mono, true);
+    }
+    CHECK_EQ(ease_in(0.5) < 0.5, true);    // slow start
+    CHECK_EQ(ease_out(0.5) > 0.5, true);   // fast start
+    CHECK_EQ(near(smoothstep(0.5), 0.5), true);
+    CHECK_EQ(ramp(0, 400), 0.0);
+    CHECK_EQ(ramp(200, 400), 0.5);
+    CHECK_EQ(ramp(9999, 400), 1.0);
+    CHECK_EQ(ramp(-50, 400), 0.0);
+    CHECK_EQ(ramp(0, 0), 1.0);  // no duration = instant (--no-anim path)
+    // Colour ramp: exact endpoints, clamped, midpoint between.
+    const Rgb a{60, 60, 60}, b{240, 140, 0};
+    CHECK_EQ(mix(a, b, 0.0) == a, true);
+    CHECK_EQ(mix(a, b, 1.0) == b, true);
+    CHECK_EQ(mix(a, b, -1.0) == a, true);
+    CHECK_EQ(mix(a, b, 2.0) == b, true);
+    Rgb m = mix(a, b, 0.5);
+    CHECK_EQ(m.r == 150 && m.g == 100 && m.b == 30, true);
+    // Warp: 0 -> 0, ends on time, monotonic, slow start, faster than 1x at the end.
+    for (double total : {300.0, 1800.0, 6000.0, 60000.0}) {
+        CHECK_EQ(warp(0, total), 0.0);
+        CHECK_EQ(std::abs(warp(total, total) - total) < 1e-6, true);
+        bool mono = true;
+        double prev = 0;
+        for (double w = 0; w <= total * 1.5; w += total / 500) {
+            double v = warp(w, total);
+            mono = mono && v >= prev;
+            prev = v;
+        }
+        CHECK_EQ(mono, true);
+        const double dt = total / 1000;
+        CHECK_EQ(warp(dt, total) / dt < 0.35, true);                        // ~0.3x at first
+        CHECK_EQ((warp(total, total) - warp(total - dt, total)) / dt > 1.0, true);  // >1x at the end
+    }
+    CHECK_EQ(warp(250, 0), 250.0);  // no total: identity
+}
+
+static void test_replay_clock() {
+    CrawlGraph r = fake();
+    r.add_edge("https://c.com/", "https://z.com/", false);
+    r.record_fetch("https://c.com/", true);
+    const int64_t total = replay_ms(r);
+    CHECK_EQ(replay_at(r, total).done, true);
+    CHECK_EQ(replay_at(r, total - 1).done, false);
+    // Schedule: monotonic, first fetch clearly slower than linear, done on time (<= +20%).
+    int64_t prev = 0;
+    bool mono = true;
+    int64_t done_at = -1, first_at = -1;  // wall ms: replay done / fetch 1's first edge lands
+    for (int64_t w = 0; w <= total * 2; ++w) {
+        int64_t c = replay_clock(w, total);
+        mono = mono && c >= prev;
+        prev = c;
+        ReplayFrame f = replay_at(r, c);
+        if (first_at < 0 && f.size >= 2) first_at = w;
+        if (done_at < 0 && f.done) done_at = w;
+    }
+    CHECK_EQ(mono, true);
+    CHECK_EQ(replay_clock(0, total), int64_t(0));
+    const int64_t linear_first = 250;  // fetch 0's first edge lands at edge_ms
+    // Tiny replay (< 1 s): the slow phase is short, but the first node still lands later than linear.
+    CHECK_EQ(first_at >= linear_first * 13 / 10, true);
+    CHECK_EQ(done_at > 0 && done_at <= total * 12 / 10, true);
+    // A long crawl (500 fetches): the first steps are slow, the whole replay still ends on time.
+    const int64_t big = 500 * 120 + 250;
+    CHECK_EQ(replay_clock(big, big), big);
+    int64_t w1 = 0;
+    while (replay_clock(w1, big) < 120) ++w1;  // wall time for the first fetch step
+    CHECK_EQ(w1 >= 300, true);
+    int64_t w_last = big;
+    while (replay_clock(w_last, big) > big - 120) --w_last;  // last fetch step
+    CHECK_EQ(big - w_last < 120, true);
+}
+
 static void test_camera() {
     View f{3, 10, -5};
     const int w = 200, h = 100;
@@ -295,6 +379,8 @@ int main() {
     test_fit();
     test_short_label();
     test_replay();
+    test_anim();
+    test_replay_clock();
     test_camera();
     test_html_text();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << " checks\n";
