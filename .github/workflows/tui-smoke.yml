@@ -17,11 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps (tmux, libssl-dev)
+      - name: Install deps (tmux, strace, libssl-dev)
         run: |
-          command -v tmux > /dev/null && dpkg -s libssl-dev > /dev/null 2>&1 \
-            || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends tmux libssl-dev; }
+          command -v tmux > /dev/null && command -v strace > /dev/null && dpkg -s libssl-dev > /dev/null 2>&1 \
+            || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends tmux strace libssl-dev; }
           tmux -V
+          strace -V | head -1
 
       - name: Build
         run: make
