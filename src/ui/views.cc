@@ -81,7 +81,7 @@ private:
 
 Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v) {
     // Copies: the lambda runs at render time, after the caller's frame may be gone.
-    return canvas([g, l, f, v](Canvas& c) {
+    Element cv = canvas([g, l, f, v](Canvas& c) {
         auto sx = [&](int id) { return l.pos[id].x * v.scale + v.ox; };
         auto sy = [&](int id) { return l.pos[id].y * v.scale + v.oy; };
         auto shown = [&](int id) {
@@ -135,7 +135,8 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
             int x = cx_of(id), y = cy_of(id);
             Color col = n.status == Status::Failed ? th::kChrome : th::depth_color(n.depth);
             bool root = id == 0;
-            c.DrawText(x, y, th::glyph(n.depth, n.status), [col, root](Cell& p) {
+            int shape = id < l.shape.size() ? l.shape[id] : -1;
+            c.DrawText(x, y, th::glyph(shape, n.status), [col, root](Cell& p) {
                 p.foreground_color = col;
                 p.bold = root;
             });
@@ -160,6 +161,14 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
             }
         }
     });
+    if (l.sites.size() < 2) return cv;
+    // Legend, bottom-left: shape -> site. Shape = site, color = depth.
+    Elements legend{text(" ")};
+    for (size_t r = 0; r < l.sites.size(); ++r)
+        legend.push_back(hbox({text(th::glyph(int(r), Status::Fetched)) | color(th::kText),
+                               text(" " + l.sites[r] + "   ") | color(th::kChrome)}));
+    legend.push_back(text("· other") | color(th::kChrome));
+    return dbox({cv, vbox({filler(), hbox(std::move(legend))})});
 }
 
 Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_depth,

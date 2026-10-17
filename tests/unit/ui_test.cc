@@ -208,7 +208,27 @@ static void test_html_text() {
     CHECK_EQ(html_to_lines("").size(), size_t(0));
 }
 
+static void test_sites() {
+    CHECK_EQ(site_of("https://pti.icann.org/x"), std::string("icann.org"));
+    CHECK_EQ(site_of("https://www.iana.org/"), std::string("iana.org"));
+    CHECK_EQ(site_of("http://localhost:8080/"), std::string("localhost"));
+    CrawlGraph g;
+    g.add_node("https://a.org/", 0);
+    g.add_node("https://b.org/1", 1);
+    g.add_node("https://b.org/2", 1);
+    g.add_node("https://x.a.org/", 1);
+    g.add_node("https://c.org/", 1);
+    for (int i = 1; i < 5; ++i) g.add_edge(g.nodes[0].url, g.nodes[i].url, false);
+    Layout l = radial_layout(g);
+    CHECK_EQ(l.sites.size(), size_t(3));
+    CHECK_EQ(l.shape[0], 0);  // a.org: 2 nodes, seen first
+    CHECK_EQ(l.shape[3], 0);  // subdomain shares the shape
+    CHECK_EQ(l.shape[1], 1);  // b.org: 2 nodes, seen second
+    CHECK_EQ(l.shape[4], 2);
+}
+
 int main() {
+    test_sites();
     test_layout();
     test_fit();
     test_short_label();

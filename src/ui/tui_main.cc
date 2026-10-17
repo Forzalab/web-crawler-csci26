@@ -309,7 +309,7 @@ int tui_main(int argc, char** argv) {
         } else {
             for (int id : hits) {
                 const Node& n = g.nodes[id];
-                rows.push_back(std::string(th::glyph(n.depth, n.status)) + " " + node_label(n.url, g.nodes[0].url) + "  d" + std::to_string(n.depth));
+                rows.push_back(std::string(th::glyph(size_t(id) < lay.shape.size() ? lay.shape[id] : -1, n.status)) + " " + node_label(n.url, g.nodes[0].url) + "  d" + std::to_string(n.depth));
             }
         }
         std::string ghost = complete(omni_text);

@@ -78,9 +78,10 @@ static Fake fake_graph() {
 
 static void test_theme() {
     CHECK(std::string(theme::glyph(0, Status::Fetched)) == "◆", "");
-    CHECK(std::string(theme::glyph(1, Status::Unfetched)) == "◆", "");
-    CHECK(std::string(theme::glyph(2, Status::Fetched)) == "•", "");
-    CHECK(std::string(theme::glyph(5, Status::Fetched)) == "·", "");
+    CHECK(std::string(theme::glyph(1, Status::Unfetched)) == "●", "");  // shape = site rank
+    CHECK(std::string(theme::glyph(5, Status::Fetched)) == "✚", "");
+    CHECK(std::string(theme::glyph(6, Status::Fetched)) == "·", "");
+    CHECK(std::string(theme::glyph(-1, Status::Fetched)) == "·", "");
     CHECK(std::string(theme::glyph(0, Status::Failed)) == "✕", "");
     CHECK(theme::depth_color(1) == theme::kAccent, "");
     CHECK(theme::depth_color(0) == theme::kText, "");
@@ -93,7 +94,6 @@ static void test_graph() {
     CHECK_HAS(out, "google.com");
     CHECK_HAS(out, "example.org");
     CHECK_LACKS(out, "maps.test");  // depth 2: glyph only
-    CHECK_HAS(out, "•");
     CHECK_HAS(out, "✕");            // github fetch failed
     CHECK_LACKS(out, "deep.test");
     CHECK_HAS(out, "·");
@@ -122,6 +122,8 @@ static void test_graph_same_site() {
     for (int i = 1; i < 4; ++i) k.g.add_edge(k.g.nodes[0].url, k.g.nodes[i].url, false);
     k.l.pos = {{0, 0}, {1, -1}, {1, -1}, {-1.5, -1}};
     k.l.parent = {-1, 0, 0, 0};
+    k.l.shape = {0, 0, 0, 1};
+    k.l.sites = {"iana.org", "icann.org"};
     k.f.node_t = {1, 1, 1, 1};
     k.f.edge_t = {1, 1, 1};
     k.f.done = true;
@@ -133,6 +135,8 @@ static void test_graph_same_site() {
     std::string under = line_of(out, 13);
     CHECK(under.find("iana.org") != std::string::npos, out);
     CHECK(line_of(out, 12).find("◆") != std::string::npos, out);
+    CHECK_HAS(out, "●");                   // icann.org: second site, second shape
+    CHECK_HAS(line_of(out, 23), "· other");  // legend on the bottom row
     size_t p = under.find("iana.org"), cols = 0;
     for (size_t i = 0; i < p; ++i) cols += (static_cast<unsigned char>(under[i]) & 0xC0) != 0x80;
     CHECK(cols == 36, out);
