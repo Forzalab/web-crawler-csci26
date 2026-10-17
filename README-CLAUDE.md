@@ -18,6 +18,8 @@ make lint       # gentle C++ habit tips (using namespace std in headers, NULL, r
 make clean
 ```
 
+`make` also copies the binary to `./a.out` in the repo root: run `./a.out` (same as `build/wc`).
+
 ## Run (pipe mode)
 
 ```sh

@@ -21,6 +21,9 @@ ftxui::Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f,
 ftxui::Element boss_bar(int depth, int max_depth, int size, int max_size,
                         bool flash_depth, bool flash_size);
 
+// The one look for every text input: white on black, rounded border (NO_COLOR: border + plain text).
+ftxui::Element input_box(ftxui::Element input);
+
 // Bottom bar: `input` is the live Input component's Element. Results drop up.
 ftxui::Element omnibar(ftxui::Element input, const std::vector<std::string>& results,
                        int selected, const std::string& ghost);
