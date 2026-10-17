@@ -3,10 +3,15 @@
 // Run: build/wc_net_test   (exit 1 if any check fails)
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <mutex>
+#include <thread>
 
 #include "mocks/mock_fetcher.h"
 #include "net/cache.h"
@@ -424,6 +429,93 @@ static void test_polite_fetch() {
     CHECK_EQ(status_label(r), std::string("OFFLINE"));
 }
 
+// 16 threads on one fetcher (the TUI's parallel crawl): a paced host (Crawl-delay) gets
+// one request at a time and exactly one pace sleep per request; an unpaced host runs in
+// parallel; robots.txt is fetched once per origin.
+static void test_parallel_fetch() {
+    std::mutex mu;
+    std::map<std::string, int> asked, in_flight, max_in_flight;
+    HttpsFetcher f([&](const Url& u) {
+        std::string k = u.str(), h = u.host;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            ++asked[k];
+            max_in_flight[h] = std::max(max_in_flight[h], ++in_flight[h]);
+        }
+        for (int i = 0; i < 40 && h == "u.com"; ++i) {  // wait (<= 200 ms) for a second request to overlap
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                if (max_in_flight[h] > 1) break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            --in_flight[h];
+        }
+        if (u.path == "/robots.txt")
+            return h == "p.com" ? resp(200, {{"content-type", "text/plain"}}, "User-agent: *\nCrawl-delay: 1\n") : resp(404, {});
+        return resp(200, {{"content-type", "text/html"}}, "<a href=/x>");
+    });
+    struct LockedSleeper : Sleeper {
+        std::mutex mu;
+        std::vector<int> ms;
+        void sleep_ms(int t) override {
+            std::lock_guard<std::mutex> lk(mu);
+            ms.push_back(t);
+        }
+    } sl;
+    f.use_sleeper(&sl);
+    std::atomic<int> ok{0};
+    std::vector<std::thread> ts;
+    for (int t = 0; t < 16; ++t)
+        ts.emplace_back([&, t] {
+            for (int i = 0; i < 5; ++i)
+                for (const char* host : {"p.com", "u.com"})
+                    ok += f.links("http://" + std::string(host) + "/" + std::to_string(t) + "-" + std::to_string(i)).has_value();
+        });
+    for (auto& t : ts) t.join();
+    CHECK_EQ(ok.load(), 160);
+    CHECK_EQ(asked["http://p.com/robots.txt"], 1);
+    CHECK_EQ(asked["http://u.com/robots.txt"], 1);
+    CHECK_EQ(max_in_flight["p.com"], 1);              // paced: one at a time
+    CHECK_EQ(max_in_flight["u.com"] > 1, true);       // unpaced: parallel
+    CHECK_EQ(sl.ms.size(), size_t(80));               // one pace sleep per p.com page, none for u.com
+    CHECK_EQ(std::count(sl.ms.begin(), sl.ms.end(), 1000), 80L);
+    CHECK_EQ(f.label_of("http://u.com/15-4"), std::string("OK"));
+}
+
+// Many threads storing / loading the cache at once: every load is whole, no .tmp left.
+static void test_cache_parallel() {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("wc_net_test_par_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    PageCache cache(dir.string());
+    std::atomic<int> bad{0};
+    std::vector<std::thread> ts;
+    for (int t = 0; t < 16; ++t)
+        ts.emplace_back([&, t] {
+            for (int i = 0; i < 30; ++i) {
+                FetchResult r;
+                r.url = "https://c.com/" + std::to_string(i % 3 == 0 ? 0 : t * 100 + i);  // page 0: shared by all
+                r.final_url = r.url;
+                r.status = 200;
+                r.content_type = "text/html";
+                r.body = std::string(1000 + i, 'x');
+                cache.store(r);
+                auto hit = cache.load(r.url);
+                if (!hit || hit->body.size() < 1000 || hit->body.find_first_not_of('x') != std::string::npos) ++bad;
+            }
+        });
+    for (auto& t : ts) t.join();
+    CHECK_EQ(bad.load(), 0);
+    int tmp = 0;
+    for (const auto& e : fs::directory_iterator(dir)) tmp += e.path().extension() == ".tmp";
+    CHECK_EQ(tmp, 0);
+    fs::remove_all(dir);
+}
+
 int main() {
     test_parse();
     test_resolve();
@@ -434,6 +526,8 @@ int main() {
     test_cache();
     test_robots_parse();
     test_polite_fetch();
+    test_parallel_fetch();
+    test_cache_parallel();
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }

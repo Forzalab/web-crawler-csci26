@@ -6,6 +6,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "net/url.h"
@@ -39,8 +40,9 @@ public:
     HttpResponse get(const Url& url);
 
 private:
-    struct Tls;  // OpenSSL context, created on the first https request
+    struct Tls;  // OpenSSL context, created once on the first https request (thread safe)
     HttpOptions opt_;
+    std::once_flag tls_once_;
     std::unique_ptr<Tls> tls_;
 };
 

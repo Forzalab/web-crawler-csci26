@@ -94,6 +94,7 @@ CrawlGraph crawl(const std::string& start, const CrawlConfig& cfg,
     CrawlGraph g;
     g.mode = cfg.mode;
     g.add_node(start, 0);
+    if (cfg.workers > 1 && cfg.mode == Mode::BFS) return resume_crawl(std::move(g), cfg, src);  // TUI only
     
     // run from root
     if (g.mode == Mode::BFS) return Crawler::crawl_bfs(start, cfg, src, sleeper, g);

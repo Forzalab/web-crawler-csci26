@@ -2,6 +2,7 @@
 #pragma once
 
 #include <istream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -31,7 +32,8 @@ public:
     explicit MockFetcher(FakeWeb web) : web_(std::move(web)) {}
     std::optional<std::vector<std::string>> links(const std::string& url) override;
 
-    // telemetry (stderr only, stdout stays deterministic)
+    // telemetry (stderr only, stdout stays deterministic). links() is thread safe;
+    // read these once the crawl is done.
     std::vector<std::string> call_log;  // every url asked, in order
     int misses = 0;                     // urls not listed in the fake web
     int failures = 0;                   // misses + k = -1 pages
@@ -39,6 +41,7 @@ public:
 
 private:
     FakeWeb web_;
+    std::mutex mu_;  // guards the telemetry (parallel crawls share one mock)
 };
 
 }  // namespace wc

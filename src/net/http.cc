@@ -172,7 +172,7 @@ HttpResponse HttpClient::get(const Url& url) {
 #ifdef WC_HAVE_OPENSSL
     SSL* ssl = nullptr;
     if (https) {
-        if (!tls_) {
+        std::call_once(tls_once_, [&] {  // get() runs on many crawl threads
             tls_ = std::make_unique<Tls>();
             tls_->ctx = SSL_CTX_new(TLS_client_method());
             SSL_CTX_set_min_proto_version(tls_->ctx, TLS1_2_VERSION);
@@ -181,7 +181,7 @@ HttpResponse HttpClient::get(const Url& url) {
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
             SSL_CTX_set_options(tls_->ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);  // servers that just close
 #endif
-        }
+        });
         ssl = SSL_new(tls_->ctx);
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, url.host.c_str());  // SNI
@@ -190,7 +190,11 @@ HttpResponse HttpClient::get(const Url& url) {
             long v = SSL_get_verify_result(ssl);
             if (v != X509_V_OK) r.error = std::string("tls: ") + X509_verify_cert_error_string(v);
             else if (timed_out()) r.error = "timeout: tls handshake";
-            else r.error = std::string("tls: ") + ERR_error_string(ERR_get_error(), nullptr);
+            else {
+                char err[256];  // own buffer: ERR_error_string(.., nullptr) shares a static one
+                ERR_error_string_n(ERR_get_error(), err, sizeof err);
+                r.error = std::string("tls: ") + err;
+            }
             ERR_clear_error();
             SSL_free(ssl);
             close(fd);

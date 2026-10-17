@@ -1,5 +1,8 @@
 #include "net/cache.h"
 
+#include <unistd.h>
+
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -88,7 +91,8 @@ void PageCache::store(FetchResult& r) const {
     for (char c : r.content_type) ct += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     bool keep = r.error.empty() && (ct.empty() || ct.find("html") != std::string::npos || ct.find("text/plain") != std::string::npos);
     const std::string& body = keep ? r.body : std::string();
-    std::string path = path_for(r.url), tmp = path + ".tmp";
+    static std::atomic<unsigned> seq{0};  // unique tmp per store: threads / processes never share one
+    std::string path = path_for(r.url), tmp = path + "." + std::to_string(getpid()) + "-" + std::to_string(seq++) + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << "WC-CACHE 1\n"
@@ -101,9 +105,14 @@ void PageCache::store(FetchResult& r) const {
             << "fetched_at: " << r.fetched_at << "\n"
             << "bytes: " << body.size() << "\n\n"
             << body;
-        if (!out) return;
+        if (!out) {
+            out.close();
+            std::filesystem::remove(tmp, ec);
+            return;
+        }
     }
     std::filesystem::rename(tmp, path, ec);  // atomic: readers never see half a file
+    if (ec) std::filesystem::remove(tmp, ec);
 }
 
 }  // namespace wc

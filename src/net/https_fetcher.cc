@@ -41,13 +41,27 @@ void HttpsFetcher::use_cache(const PageCache* cache, bool offline, bool refresh)
 }
 
 std::string HttpsFetcher::label_of(const std::string& url) const {
+    std::lock_guard<std::mutex> lk(mu_);
     auto it = labels_.find(url);
     return it == labels_.end() ? "" : it->second;
 }
 
+FetchResult HttpsFetcher::last() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return last_;
+}
+
 void HttpsFetcher::slow_host(const std::string& host, int ms) {
+    std::lock_guard<std::mutex> lk(mu_);
     int& d = host_delay_ms_[host];
     d = std::max(d, std::min(ms, kMaxHostDelayMs));
+}
+
+std::mutex& HttpsFetcher::gate(std::unordered_map<std::string, std::unique_ptr<std::mutex>>& gates, const std::string& key) {
+    std::lock_guard<std::mutex> lk(mu_);
+    auto& g = gates[key];
+    if (!g) g = std::make_unique<std::mutex>();
+    return *g;  // never erased: the reference stays valid
 }
 
 FetchResult HttpsFetcher::fetch(const std::string& url, bool html) {
@@ -85,8 +99,11 @@ std::optional<FetchResult> HttpsFetcher::robots_block(const std::string& url, co
     r.url = url;
     r.final_url = u.str();
     std::string origin = u.scheme + "://" + u.host_port();
+    std::lock_guard<std::mutex> once(gate(robots_gate_, origin));  // first fetch of it: the others wait
+    std::unique_lock<std::mutex> lk(mu_);
     auto it = robots_.find(origin);
     if (it == robots_.end()) {
+        lk.unlock();
         FetchResult rr = fetch(origin + "/robots.txt", /*html=*/false);
         if (rr.status == 0 && !starts_with(rr.error, "offline")) {
             r.error = rr.error;  // dns/connect/timeout: the page would fail the same way. Not memoized.
@@ -97,6 +114,7 @@ std::optional<FetchResult> HttpsFetcher::robots_block(const std::string& url, co
         else if (!(rr.status >= 400 && rr.status < 500) && !starts_with(rr.error, "offline"))
             rules.block_all = true;  // 5xx, redirect loop, too large...: RFC 9309 says assume disallow
         if (rules.crawl_delay_ms > 0) slow_host(u.host_port(), rules.crawl_delay_ms);
+        lk.lock();
         it = robots_.emplace(origin, std::move(rules)).first;
     }
     if (it->second.allowed(u.target())) return std::nullopt;
@@ -117,10 +135,19 @@ FetchResult HttpsFetcher::fetch_live(const std::string& url) {
     bool waited = false;  // just slept a Retry-After: skip the host pacing once
     while (true) {
         r.final_url = u->str();
-        auto delay = host_delay_ms_.find(u->host_port());
-        if (!waited && delay != host_delay_ms_.end()) sleeper_->sleep_ms(delay->second);
+        HttpResponse resp;
+        {
+            std::optional<int> delay;  // paced host: one request at a time, `delay` ms before each
+            {
+                std::lock_guard<std::mutex> lk(mu_);
+                if (auto d = host_delay_ms_.find(u->host_port()); d != host_delay_ms_.end()) delay = d->second;
+            }
+            std::unique_lock<std::mutex> one;
+            if (delay) one = std::unique_lock<std::mutex>(gate(host_gate_, u->host_port()));
+            if (!waited && delay) sleeper_->sleep_ms(*delay);
+            resp = get_(*u);
+        }
         waited = false;
-        HttpResponse resp = get_(*u);
         r.status = resp.status;
         if (!resp.error.empty()) {
             r.error = resp.error;
@@ -169,10 +196,13 @@ FetchResult HttpsFetcher::fetch_live(const std::string& url) {
 }
 
 std::optional<std::vector<std::string>> HttpsFetcher::links(const std::string& url) {
-    last_ = fetch(url);
+    FetchResult r = fetch(url);
     std::optional<std::vector<std::string>> out;
-    if (last_.error.empty()) out = extract_links(last_.body, *parse_url(last_.final_url));
-    labels_[url] = status_label(last_, out ? static_cast<long>(out->size()) : -1);
+    if (r.error.empty()) out = extract_links(r.body, *parse_url(r.final_url));
+    std::string label = status_label(r, out ? static_cast<long>(out->size()) : -1);
+    std::lock_guard<std::mutex> lk(mu_);
+    labels_[url] = std::move(label);
+    last_ = std::move(r);
     return out;
 }
 

@@ -50,7 +50,10 @@ std::optional<std::vector<std::string>> ProgressTap::links(const std::string& ur
     all_.depth = std::max(all_.depth, d);
     if (r) {
         all_.links += int(r->size());
-        for (const auto& l : *r) depth_of_.emplace(l, d + 1);
+        for (const auto& l : *r) {  // parallel crawls land out of order: keep the smallest depth
+            auto [it, fresh] = depth_of_.emplace(l, d + 1);
+            if (!fresh) it->second = std::min(it->second, d + 1);
+        }
     }
     return r;
 }
