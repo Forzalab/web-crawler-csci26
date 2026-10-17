@@ -10,6 +10,7 @@
 #include <ftxui/dom/canvas.hpp>
 #include <ftxui/dom/node.hpp>
 
+#include "ui/anim.h"
 #include "ui/theme.h"
 
 namespace wc::views {
@@ -280,13 +281,25 @@ Element loading(const LoadingState& s, Element background) {
         hbox({count(" pages ", p.pages), count(" links ", p.links), count(" fail ", p.failed), count(" depth ", p.depth)}),
         separatorLight() | color(th::kFaint),
     };
-    // Checklist: newest at the bottom, brightest; older lines fade toward the chrome grey.
+    // Checklist: newest at the bottom, brightest; older lines step down toward the chrome grey.
+    // Fades (s.fade): each line rises from faint as it lands; a full list sinks its top line.
+    using anim::Rgb;
+    const Rgb mid{180, 180, 180};
+    const int kFadeMs = 400;
     int n = int(p.recent.size());
+    const bool full = s.rows > 0 && n >= s.rows;
+    const double out_t = s.fade && full && n > 1 ? anim::ramp(s.now_ms - p.recent.back().at_ms, kFadeMs) : 0.0;
     for (int i = 0; i < n; ++i) {
         const FetchLine& f = p.recent[size_t(i)];
-        Color c = i == n - 1 ? th::kText : i >= n - 3 ? Color::RGB(180, 180, 180) : th::kChrome;
-        rows.push_back(hbox({text(f.ok ? " ✓ " : " ✗ ") | color(f.ok ? th::kAccent : th::kChrome),
-                             text(short_label(f.url) + url_path(f.url)) | color(c)}));
+        Rgb c = i == n - 1 ? th::rgb::kText : i >= n - 3 ? mid : th::rgb::kChrome;
+        Rgb mark = f.ok ? th::rgb::kAccent : th::rgb::kChrome;
+        if (s.fade) {
+            double in = anim::ease_out(anim::ramp(s.now_ms - f.at_ms, kFadeMs));
+            double vis = i == 0 ? in * (1.0 - anim::ease_in(out_t)) : in;
+            c = anim::mix(th::rgb::kFaint, c, vis), mark = anim::mix(th::rgb::kFaint, mark, vis);
+        }
+        rows.push_back(hbox({text(f.ok ? " ✓ " : " ✗ ") | color(th::to_color(mark)),
+                             text(short_label(f.url) + url_path(f.url)) | color(th::to_color(c))}));
     }
     // Fixed width (no wobble as longer labels land), every line clipped to it; border adds 2.
     int w = std::clamp(s.cols - 4, 20, 62);

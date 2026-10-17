@@ -22,4 +22,13 @@ struct ReplayTiming { int step_ms = 120; int edge_ms = 250; };
 
 ReplayFrame replay_at(const CrawlGraph& g, int64_t elapsed_ms, ReplayTiming t = {});
 
+// When the last edge lands (ms of content time): replay_at(g, replay_ms(g)).done.
+int64_t replay_ms(const CrawlGraph& g, ReplayTiming t = {});
+
+// Replay clock: wall ms since the replay began -> content ms for replay_at.
+// Starts at ~0.3x so the first fetches land one by one, accelerates smoothly
+// over the first <= 4 s, then runs faster than 1x so it still ends at total_ms
+// (anim::warp). Monotonic. --no-anim: skip it and pass a huge elapsed instead.
+int64_t replay_clock(int64_t wall_ms, int64_t total_ms);
+
 }  // namespace wc

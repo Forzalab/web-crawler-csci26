@@ -1,6 +1,6 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
 // URL -> Visualize? -> Max depth -> Max pages -> crawl (live loading screen) -> graph + omnibar.
-// Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow.
+// Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps.
 // Graph keys (empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
 // Enter on a result opens its page preview (cache, else live fetch).
 #include <atomic>
@@ -23,6 +23,7 @@
 #include "core/crawl.h"
 #include "net/cache.h"
 #include "net/https_fetcher.h"
+#include "ui/anim.h"
 #include "ui/camera.h"
 #include "ui/fixture_source.h"
 #include "ui/front_ends.h"
@@ -164,6 +165,7 @@ int tui_main(int argc, char** argv) {
 
     // Main screen state.
     Layout lay;
+    int64_t replay_total = 0;  // content ms of the whole replay (replay_ms), warped by replay_clock
     Clock::time_point t0, toast_at, flash_depth_at, flash_size_at;
     bool flashed_depth = false, flashed_size = false, bridges_shown = false;
     std::string toast_text;
@@ -233,6 +235,7 @@ int tui_main(int argc, char** argv) {
             return;
         }
         lay = radial_layout(g);
+        replay_total = replay_ms(g);
         t0 = last_frame = last_input = Clock::now();
         step = Step::Main;
         tab = 2;
@@ -270,7 +273,8 @@ int tui_main(int argc, char** argv) {
     };
 
     auto main_screen = [&]() -> Element {
-        int64_t el = no_anim ? INT64_MAX / 4 : ms_since(t0);
+        // Slow first fetches, then faster; ends when the old linear replay did.
+        int64_t el = no_anim ? INT64_MAX / 4 : replay_clock(ms_since(t0), replay_total);
         ReplayFrame f = replay_at(g, el);
         if (!flashed_depth && f.depth >= cfg.maxDepth) flashed_depth = true, flash_depth_at = Clock::now();
         if (!flashed_size && f.size >= cfg.maxSize) flashed_size = true, flash_size_at = Clock::now();
@@ -344,6 +348,8 @@ int tui_main(int argc, char** argv) {
     // Loading screen: spinner, rotating one-liner, live counters, a checklist of
     // fetches as they land, border breathing over 1.6 s. Behind it: dim green matrix
     // rain (none under --no-anim / NO_COLOR; orange is reserved for advanced mode).
+    // Progressive: checklist lines fade in/out; the rain starts as a few slow columns
+    // and ramps to full density/speed/variety over ~8 s.
     auto crawling_screen = [&](Dimensions ts) -> Element {
         int64_t ms = ms_since(crawl_t0);
         views::LoadingState st;
@@ -352,10 +358,14 @@ int tui_main(int argc, char** argv) {
         st.tick = tick;
         st.cols = ts.dimx;
         st.pulse = no_anim ? 1.0f : float(0.5 + 0.5 * std::sin(ms / 1000.0 * 2 * M_PI / 1.6));
-        st.progress = tap.snapshot(size_t(views::loading_rows(ts.dimy)));
+        st.rows = views::loading_rows(ts.dimy);
+        st.progress = tap.snapshot(size_t(st.rows));
+        st.fade = !no_anim;
+        st.now_ms = anim::now_ms();
         Element bg = emptyElement();
         if (!no_anim) {
             rain.resize(ts.dimx, ts.dimy);
+            rain.set_intensity(float(anim::smoothstep(anim::ramp(ms, 8000))));
             bg = rain.render(matrix::kGreenDim) | flex;
         }
         return views::loading(st, std::move(bg));
