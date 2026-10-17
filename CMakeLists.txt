@@ -55,6 +55,25 @@ else()
   message(WARNING "OpenSSL not found: https:// fetches will fail (install libssl-dev)")
 endif()
 
+# --- wc_ui_logic: pure TUI logic (no FTXUI): layout, replay, omnibar, osc52 -
+add_library(wc_ui_logic STATIC
+  src/ui/layout.cc
+  src/ui/replay.cc
+  src/ui/omni_query.cc
+  src/ui/osc52.cc
+)
+target_include_directories(wc_ui_logic PUBLIC src)
+target_link_libraries(wc_ui_logic PUBLIC wc_core)
+target_compile_options(wc_ui_logic PRIVATE -Wall -Wextra)
+
+# --- wc_ui_views: FTXUI elements (state in, Element out; headless-testable) -
+add_library(wc_ui_views STATIC
+  src/ui/views.cc
+  src/ui/theme.cc
+)
+target_link_libraries(wc_ui_views PUBLIC wc_ui_logic ftxui::dom ftxui::screen)
+target_compile_options(wc_ui_views PRIVATE -Wall -Wextra)
+
 # --- wc: the binary (pipe mode + TUI + teammate adapters) -------------------
 add_executable(wc
   src/main.cc
@@ -66,7 +85,7 @@ add_executable(wc
   src/team/josh.cc                 # #1 Josh writes here
   src/team/logan.cc                # #3 Logan writes here
 )
-target_link_libraries(wc PRIVATE wc_core wc_net ftxui::component ftxui::dom ftxui::screen)
+target_link_libraries(wc PRIVATE wc_core wc_net wc_ui_views ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)
 
 # --- unit tests (no network): tests/unit/ ------------------------------------
@@ -76,6 +95,16 @@ target_compile_options(wc_net_test PRIVATE -Wall -Wextra)
 add_executable(wc_graph_test tests/unit/graph_test.cc)
 target_link_libraries(wc_graph_test PRIVATE wc_core)
 target_compile_options(wc_graph_test PRIVATE -Wall -Wextra)
+
+add_executable(wc_ui_test tests/unit/ui_test.cc)        # layout + replay
+target_link_libraries(wc_ui_test PRIVATE wc_ui_logic)
+add_executable(wc_query_test tests/unit/query_test.cc)  # omnibar + osc52
+target_link_libraries(wc_query_test PRIVATE wc_ui_logic)
+add_executable(wc_views_test tests/unit/views_test.cc)  # headless snapshots
+target_link_libraries(wc_views_test PRIVATE wc_ui_views)
+foreach(t wc_ui_test wc_query_test wc_views_test)
+  target_compile_options(${t} PRIVATE -Wall -Wextra)
+endforeach()
 
 # --- test_bridges_json: golden tests for the BRIDGES JSON writer -----------
 add_executable(test_bridges_json tests/bridges/test_bridges_json.cc)

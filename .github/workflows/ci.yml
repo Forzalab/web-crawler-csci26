@@ -39,6 +39,13 @@ jobs:
       - name: Unit tests (src/net, no network)
         run: build/wc_net_test
 
+      - name: Unit tests (graph + TUI logic + headless views)
+        run: |
+          build/wc_graph_test
+          build/wc_ui_test
+          build/wc_query_test
+          NO_COLOR=1 build/wc_views_test
+
       - name: BRIDGES JSON golden tests
         continue-on-error: true
         run: build/test_bridges_json tests/bridges/golden
