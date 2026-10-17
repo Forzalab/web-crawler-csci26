@@ -81,6 +81,7 @@ add_executable(wc
   src/main.cc
   src/ui/pipe_main.cc
   src/ui/tui_main.cc
+  src/ui/fixture_source.cc
   src/ui/links_main.cc
   src/adapters/josh_fetcher.cc
   src/adapters/logan_renderer.cc

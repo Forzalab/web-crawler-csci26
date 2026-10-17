@@ -24,6 +24,7 @@
 #include "net/cache.h"
 #include "net/https_fetcher.h"
 #include "ui/camera.h"
+#include "ui/fixture_source.h"
 #include "ui/front_ends.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
@@ -158,6 +159,10 @@ int tui_main(int argc, char** argv) {
     tls.use_robots(true);
     RoutedFetcher routed(josh, tls);
     RealSleeper sleeper;
+    NoSleeper no_sleep;
+    auto fixture = fixture_source_from_env();  // WC_FIXTURE=file: fake web, no network (tests/smoke)
+    LinkSource& source = fixture ? *fixture : static_cast<LinkSource&>(routed);
+    Sleeper& pause = fixture ? static_cast<Sleeper&>(no_sleep) : sleeper;
     std::string start;
     CrawlGraph g;
     std::thread worker, ticker;
@@ -211,7 +216,7 @@ int tui_main(int argc, char** argv) {
     auto start_crawl = [&] {
         step = Step::Crawling;
         worker = std::thread([&] {
-            CrawlGraph r = crawl(start, cfg, routed, sleeper);
+            CrawlGraph r = crawl(start, cfg, source, pause);
             screen.Post([&, r = std::move(r)]() mutable {
                 g = std::move(r);
                 crawl_done = true;
