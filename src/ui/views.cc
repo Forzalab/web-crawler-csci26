@@ -214,4 +214,39 @@ Element too_small(int w, int h) {
            flex;
 }
 
+Element preview(const std::string& title, const std::vector<std::string>& lines, int scroll,
+                float glow, bool maximized) {
+    Color edge = Color::Interpolate(std::clamp(glow, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+    Elements body;
+    for (size_t i = size_t(std::max(0, scroll)); i < lines.size(); ++i) {
+        const std::string& ln = lines[i];
+        if (ln.rfind("# ", 0) == 0)
+            body.push_back(paragraph(ln.substr(2)) | bold | color(th::kText));
+        else if (ln.rfind("[IMG", 0) == 0)
+            body.push_back(paragraph(ln) | dim | color(th::kAccent));
+        else
+            body.push_back(paragraph(ln) | color(th::kText));
+    }
+    Element content = vbox({
+        vbox(std::move(body)) | flex,
+        text("j/k scroll · m max · Esc close") | dim | color(th::kChrome),
+    });
+    // color() paints the border; every child above sets its own colour on top.
+    Element panel = window(text(" PREVIEW · " + title + " ") | bold | color(th::kAccent),
+                           std::move(content), ROUNDED) |
+                    color(edge) | clear_under;  // opaque over the graph
+    // Vendored Size::SetBox keeps value+2 cols (x_min + value + 1), so 58 -> 60 wide.
+    return maximized ? panel : panel | size(WIDTH, LESS_THAN, 58);
+}
+
+Element coach(int step, int total, const std::string& t) {
+    return vbox({
+               hbox({text(std::to_string(step) + "/" + std::to_string(total)) | bold |
+                         color(th::kAccent),
+                     text("  " + t) | color(th::kText)}),
+               text("Tab next · Esc skip") | dim | color(th::kChrome),
+           }) |
+           borderStyled(ROUNDED, th::kFaint);
+}
+
 }  // namespace wc::views

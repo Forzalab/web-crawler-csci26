@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
@@ -217,6 +218,44 @@ static void test_toast_too_small() {
     CHECK_HAS(out, "Enlarge terminal to 80×24 (now 60×20)");
 }
 
+static std::vector<std::string> page_lines() {
+    return {"# Google Maps", "Find local businesses, view maps and get directions.",
+            "- Directions", "- Satellite", "[IMG logo.png]", "Footer text"};
+}
+
+static void test_preview() {
+    std::string out = render(views::preview("maps.google.com", page_lines(), 0, 1.0f, false), 80, 16);
+    CHECK(line_of(out, 0).find("PREVIEW · maps.google.com") != std::string::npos, out);
+    CHECK(line_of(out, 0).find("╭") != std::string::npos, out);
+    CHECK_HAS(out, "Google Maps");
+    CHECK_LACKS(out, "# Google");
+    CHECK_HAS(out, "- Directions");
+    CHECK_HAS(out, "[IMG");
+    CHECK_HAS(out, "Esc close");
+    std::string top = line_of(out, 0);
+    size_t a = top.find("╭"), b = top.find("╮");
+    auto cols = [](const std::string& s) {
+        size_t n = 0;
+        for (unsigned char ch : s) n += (ch & 0xC0) != 0x80;
+        return n;
+    };
+    CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 <= 60, out);
+    out = render(views::preview("maps.google.com", page_lines(), 1, 0.0f, false), 80, 16);
+    CHECK_LACKS(out, "Google Maps");
+    CHECK_HAS(out, "Find local");
+    out = render(views::preview("maps.google.com", page_lines(), 0, 0.5f, true), 100, 16);
+    top = line_of(out, 0);
+    a = top.find("╭"), b = top.find("╮");
+    CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 > 60, out);
+}
+
+static void test_coach() {
+    std::string out = render(views::coach(1, 3, "Type a URL to start"), 40, 4);
+    CHECK_HAS(out, "1/3  Type a URL to start");
+    CHECK_HAS(out, "Tab next · Esc skip");
+    CHECK_HAS(out, "╭");
+}
+
 static void dump_main() {
     Fake k = fake_graph();
     View v{36, 110, 24};
@@ -225,6 +264,8 @@ static void dump_main() {
         views::graph(k.g, k.l, k.f, v) | flex,
         views::omnibar(text(""), {}, -1, "type to search · /bridges"),
     });
+    main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, 1.0f,
+                                                      false)})});
     std::cout << render(main, 100, 30) << "\n";
 }
 
@@ -236,6 +277,8 @@ int main() {
     test_boss_bar();
     test_omnibar();
     test_toast_too_small();
+    test_preview();
+    test_coach();
     if (std::getenv("WC_VIEWS_DUMP")) dump_main();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << "\n";
     return failures ? 1 : 0;
