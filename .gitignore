@@ -31,3 +31,4 @@ THIS_IS_YOUR_OUTPUT
 # Vercel / Node
 .vercel/
 node_modules/
+build-*/
