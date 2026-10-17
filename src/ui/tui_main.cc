@@ -27,6 +27,7 @@
 #include "ui/front_ends.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
+#include "ui/matrix.h"
 #include "ui/omni_query.h"
 #include "ui/osc52.h"
 #include "ui/replay.h"
@@ -122,6 +123,7 @@ Element summary_screen(const CrawlGraph& g) {
 }  // namespace
 
 int tui_main(int argc, char** argv) {
+    if (const char* d = std::getenv("WC_MATRIX_DEMO"); d && *d == '1') return matrix::demo();
     bool no_anim = std::getenv("NO_COLOR") != nullptr;
     for (int i = 1; i < argc; ++i)
         if (!std::strcmp(argv[i], "--no-anim")) no_anim = true;

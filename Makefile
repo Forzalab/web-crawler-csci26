@@ -14,6 +14,7 @@ unit: all
 	$(BUILD)/wc_ui_test
 	$(BUILD)/wc_query_test
 	NO_COLOR=1 $(BUILD)/wc_views_test
+	$(BUILD)/wc_matrix_test
 	$(BUILD)/test_bridges_json tests/bridges/golden
 
 test: unit
