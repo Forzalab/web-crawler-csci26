@@ -81,7 +81,7 @@ private:
 
 Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v) {
     // Copies: the lambda runs at render time, after the caller's frame may be gone.
-    return canvas([g, l, f, v](Canvas& c) {
+    Element cv = canvas([g, l, f, v](Canvas& c) {
         auto sx = [&](int id) { return l.pos[id].x * v.scale + v.ox; };
         auto sy = [&](int id) { return l.pos[id].y * v.scale + v.oy; };
         auto shown = [&](int id) {
@@ -135,7 +135,8 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
             int x = cx_of(id), y = cy_of(id);
             Color col = n.status == Status::Failed ? th::kChrome : th::depth_color(n.depth);
             bool root = id == 0;
-            c.DrawText(x, y, th::glyph(n.depth, n.status), [col, root](Cell& p) {
+            int shape = id < l.shape.size() ? l.shape[id] : -1;
+            c.DrawText(x, y, th::glyph(shape, n.status), [col, root](Cell& p) {
                 p.foreground_color = col;
                 p.bold = root;
             });
@@ -160,6 +161,14 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
             }
         }
     });
+    if (l.sites.size() < 2) return cv;
+    // Legend, bottom-left: shape -> site. Shape = site, color = depth.
+    Elements legend{text(" ")};
+    for (size_t r = 0; r < l.sites.size(); ++r)
+        legend.push_back(hbox({text(th::glyph(int(r), Status::Fetched)) | color(th::kText),
+                               text(" " + l.sites[r] + "   ") | color(th::kChrome)}));
+    legend.push_back(text("· other") | color(th::kChrome));
+    return dbox({cv, vbox({filler(), hbox(std::move(legend))})});
 }
 
 Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_depth,
@@ -212,6 +221,41 @@ Element too_small(int w, int h) {
                filler(),
            }) |
            flex;
+}
+
+Element preview(const std::string& title, const std::vector<std::string>& lines, int scroll,
+                float glow, bool maximized) {
+    Color edge = Color::Interpolate(std::clamp(glow, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+    Elements body;
+    for (size_t i = size_t(std::max(0, scroll)); i < lines.size(); ++i) {
+        const std::string& ln = lines[i];
+        if (ln.rfind("# ", 0) == 0)
+            body.push_back(paragraph(ln.substr(2)) | bold | color(th::kText));
+        else if (ln.rfind("[IMG", 0) == 0)
+            body.push_back(paragraph(ln) | dim | color(th::kAccent));
+        else
+            body.push_back(paragraph(ln) | color(th::kText));
+    }
+    Element content = vbox({
+        vbox(std::move(body)) | flex,
+        text("j/k scroll · m max · Esc close") | dim | color(th::kChrome),
+    });
+    // color() paints the border; every child above sets its own colour on top.
+    Element panel = window(text(" PREVIEW · " + title + " ") | bold | color(th::kAccent),
+                           std::move(content), ROUNDED) |
+                    color(edge) | clear_under;  // opaque over the graph
+    // Vendored Size::SetBox keeps value+2 cols (x_min + value + 1), so 58 -> 60 wide.
+    return maximized ? panel : panel | size(WIDTH, LESS_THAN, 58);
+}
+
+Element coach(int step, int total, const std::string& t) {
+    return vbox({
+               hbox({text(std::to_string(step) + "/" + std::to_string(total)) | bold |
+                         color(th::kAccent),
+                     text("  " + t) | color(th::kText)}),
+               text("Tab next · Esc skip") | dim | color(th::kChrome),
+           }) |
+           borderStyled(ROUNDED, th::kFaint);
 }
 
 }  // namespace wc::views

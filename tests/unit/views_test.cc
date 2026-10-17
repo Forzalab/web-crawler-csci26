@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
@@ -77,9 +78,10 @@ static Fake fake_graph() {
 
 static void test_theme() {
     CHECK(std::string(theme::glyph(0, Status::Fetched)) == "◆", "");
-    CHECK(std::string(theme::glyph(1, Status::Unfetched)) == "◆", "");
-    CHECK(std::string(theme::glyph(2, Status::Fetched)) == "•", "");
-    CHECK(std::string(theme::glyph(5, Status::Fetched)) == "·", "");
+    CHECK(std::string(theme::glyph(1, Status::Unfetched)) == "●", "");  // shape = site rank
+    CHECK(std::string(theme::glyph(5, Status::Fetched)) == "✚", "");
+    CHECK(std::string(theme::glyph(6, Status::Fetched)) == "·", "");
+    CHECK(std::string(theme::glyph(-1, Status::Fetched)) == "·", "");
     CHECK(std::string(theme::glyph(0, Status::Failed)) == "✕", "");
     CHECK(theme::depth_color(1) == theme::kAccent, "");
     CHECK(theme::depth_color(0) == theme::kText, "");
@@ -92,7 +94,6 @@ static void test_graph() {
     CHECK_HAS(out, "google.com");
     CHECK_HAS(out, "example.org");
     CHECK_LACKS(out, "maps.test");  // depth 2: glyph only
-    CHECK_HAS(out, "•");
     CHECK_HAS(out, "✕");            // github fetch failed
     CHECK_LACKS(out, "deep.test");
     CHECK_HAS(out, "·");
@@ -121,6 +122,8 @@ static void test_graph_same_site() {
     for (int i = 1; i < 4; ++i) k.g.add_edge(k.g.nodes[0].url, k.g.nodes[i].url, false);
     k.l.pos = {{0, 0}, {1, -1}, {1, -1}, {-1.5, -1}};
     k.l.parent = {-1, 0, 0, 0};
+    k.l.shape = {0, 0, 0, 1};
+    k.l.sites = {"iana.org", "icann.org"};
     k.f.node_t = {1, 1, 1, 1};
     k.f.edge_t = {1, 1, 1};
     k.f.done = true;
@@ -132,6 +135,8 @@ static void test_graph_same_site() {
     std::string under = line_of(out, 13);
     CHECK(under.find("iana.org") != std::string::npos, out);
     CHECK(line_of(out, 12).find("◆") != std::string::npos, out);
+    CHECK_HAS(out, "●");                   // icann.org: second site, second shape
+    CHECK_HAS(line_of(out, 23), "· other");  // legend on the bottom row
     size_t p = under.find("iana.org"), cols = 0;
     for (size_t i = 0; i < p; ++i) cols += (static_cast<unsigned char>(under[i]) & 0xC0) != 0x80;
     CHECK(cols == 36, out);
@@ -217,6 +222,44 @@ static void test_toast_too_small() {
     CHECK_HAS(out, "Enlarge terminal to 80×24 (now 60×20)");
 }
 
+static std::vector<std::string> page_lines() {
+    return {"# Google Maps", "Find local businesses, view maps and get directions.",
+            "- Directions", "- Satellite", "[IMG logo.png]", "Footer text"};
+}
+
+static void test_preview() {
+    std::string out = render(views::preview("maps.google.com", page_lines(), 0, 1.0f, false), 80, 16);
+    CHECK(line_of(out, 0).find("PREVIEW · maps.google.com") != std::string::npos, out);
+    CHECK(line_of(out, 0).find("╭") != std::string::npos, out);
+    CHECK_HAS(out, "Google Maps");
+    CHECK_LACKS(out, "# Google");
+    CHECK_HAS(out, "- Directions");
+    CHECK_HAS(out, "[IMG");
+    CHECK_HAS(out, "Esc close");
+    std::string top = line_of(out, 0);
+    size_t a = top.find("╭"), b = top.find("╮");
+    auto cols = [](const std::string& s) {
+        size_t n = 0;
+        for (unsigned char ch : s) n += (ch & 0xC0) != 0x80;
+        return n;
+    };
+    CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 <= 60, out);
+    out = render(views::preview("maps.google.com", page_lines(), 1, 0.0f, false), 80, 16);
+    CHECK_LACKS(out, "Google Maps");
+    CHECK_HAS(out, "Find local");
+    out = render(views::preview("maps.google.com", page_lines(), 0, 0.5f, true), 100, 16);
+    top = line_of(out, 0);
+    a = top.find("╭"), b = top.find("╮");
+    CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 > 60, out);
+}
+
+static void test_coach() {
+    std::string out = render(views::coach(1, 3, "Type a URL to start"), 40, 4);
+    CHECK_HAS(out, "1/3  Type a URL to start");
+    CHECK_HAS(out, "Tab next · Esc skip");
+    CHECK_HAS(out, "╭");
+}
+
 static void dump_main() {
     Fake k = fake_graph();
     View v{36, 110, 24};
@@ -225,6 +268,8 @@ static void dump_main() {
         views::graph(k.g, k.l, k.f, v) | flex,
         views::omnibar(text(""), {}, -1, "type to search · /bridges"),
     });
+    main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, 1.0f,
+                                                      false)})});
     std::cout << render(main, 100, 30) << "\n";
 }
 
@@ -236,6 +281,8 @@ int main() {
     test_boss_bar();
     test_omnibar();
     test_toast_too_small();
+    test_preview();
+    test_coach();
     if (std::getenv("WC_VIEWS_DUMP")) dump_main();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << "\n";
     return failures ? 1 : 0;

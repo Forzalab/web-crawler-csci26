@@ -61,6 +61,8 @@ add_library(wc_ui_logic STATIC
   src/ui/replay.cc
   src/ui/omni_query.cc
   src/ui/osc52.cc
+  src/ui/camera.cc
+  src/ui/html_text.cc
 )
 target_include_directories(wc_ui_logic PUBLIC src)
 target_link_libraries(wc_ui_logic PUBLIC wc_core)

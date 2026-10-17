@@ -14,6 +14,6 @@ inline const ftxui::Color kChrome = ftxui::Color::RGB(110, 110, 110);
 inline const ftxui::Color kFaint = ftxui::Color::RGB(60, 60, 60);
 
 ftxui::Color depth_color(int depth);       // 0 white, 1 orange, 2 dim orange, 3+ greys
-const char* glyph(int depth, Status s);    // ● ◆ ○ · ; ✕ failed
+const char* glyph(int shape, Status s);    // shape = site rank: ◆ ● ■ ▲ ★ ✚, -1 ·, ✕ failed
 
 }  // namespace wc::theme

@@ -1,6 +1,8 @@
 // theme.cc - see theme.h
 #include "ui/theme.h"
 
+#include <iterator>
+
 namespace wc::theme {
 
 ftxui::Color depth_color(int depth) {
@@ -13,14 +15,10 @@ ftxui::Color depth_color(int depth) {
     }
 }
 
-const char* glyph(int depth, Status s) {
+const char* glyph(int shape, Status s) {
+    static const char* kGlyph[] = {"◆", "●", "■", "▲", "★", "✚"};  // kShapes
     if (s == Status::Failed) return "✕";
-    switch (depth) {
-        case 0: return "◆";
-        case 1: return "◆";
-        case 2: return "•";
-        default: return "·";
-    }
+    return shape >= 0 && shape < int(std::size(kGlyph)) ? kGlyph[shape] : "·";
 }
 
 }  // namespace wc::theme

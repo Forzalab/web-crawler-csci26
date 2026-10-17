@@ -50,6 +50,28 @@ Layout radial_layout(const CrawlGraph& g) {
         double ang = lo[i] + span[i] / 2.0, r = g.nodes[i].depth;
         l.pos[i] = Pt{r * std::cos(ang), r * std::sin(ang)};
     }
+    // Shapes: one per site, most nodes first, ties by first appearance.
+    std::vector<std::pair<std::string, int>> count;  // (site, nodes), first-seen order
+    std::vector<int> site_idx(n);
+    for (int i = 0; i < n; ++i) {
+        std::string s = site_of(g.nodes[i].url);
+        int k = 0;
+        while (k < int(count.size()) && count[k].first != s) ++k;
+        if (k == int(count.size())) count.push_back({s, 0});
+        ++count[k].second;
+        site_idx[i] = k;
+    }
+    std::vector<int> order(count.size());
+    for (size_t k = 0; k < order.size(); ++k) order[k] = int(k);
+    std::stable_sort(order.begin(), order.end(),
+                     [&](int a, int b) { return count[a].second > count[b].second; });
+    std::vector<int> rank(count.size(), -1);
+    for (int r = 0; r < int(order.size()) && r < kShapes; ++r) {
+        rank[order[r]] = r;
+        l.sites.push_back(count[order[r]].first);
+    }
+    l.shape.resize(n);
+    for (int i = 0; i < n; ++i) l.shape[i] = rank[site_idx[i]];
     return l;
 }
 
@@ -118,3 +140,11 @@ std::string node_label(const std::string& url, const std::string& root_url) {
 }
 
 }  // namespace wc
+
+std::string wc::site_of(const std::string& url) {
+    std::string h = short_label(url);
+    size_t last = h.rfind('.');
+    if (last == std::string::npos || last == 0) return h;
+    size_t prev = h.rfind('.', last - 1);
+    return prev == std::string::npos ? h : h.substr(prev + 1);
+}

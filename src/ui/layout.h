@@ -16,7 +16,14 @@ struct Pt { double x = 0, y = 0; };
 struct Layout {
     std::vector<Pt> pos;      // per node id, world units (ring r = depth)
     std::vector<int> parent;  // per node id, -1 for root (tree edge source)
+    std::vector<int> shape;   // per node id: site rank 0..kShapes-1 (most nodes first), -1 = other
+    std::vector<std::string> sites;  // sites[rank], for the legend
 };
+
+constexpr int kShapes = 6;  // distinct node shapes; more sites than this share "·"
+
+// "https://pti.icann.org/x" -> "icann.org" (last two host labels). Shape key.
+std::string site_of(const std::string& url);
 
 Layout radial_layout(const CrawlGraph& g);
 
