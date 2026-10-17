@@ -1,9 +1,11 @@
-// ui_test.cc - unit tests for src/ui/layout + src/ui/replay (pure TUI logic).
+// ui_test.cc - unit tests for src/ui/layout, replay, camera, html_text (pure TUI logic).
 // Run: build/wc_ui_test   (exit 1 if any check fails)
 #include <cmath>
 #include <iostream>
 
 #include "core/graph.h"
+#include "ui/camera.h"
+#include "ui/html_text.h"
 #include "ui/layout.h"
 #include "ui/replay.h"
 
@@ -149,11 +151,70 @@ static void test_replay() {
     CHECK_EQ(m.node_t[4], 0.5f);
 }
 
+static void test_camera() {
+    View f{3, 10, -5};
+    const int w = 200, h = 100;
+    View v = apply(Camera{}, f, w, h);
+    CHECK_EQ(near(v.scale, 3) && near(v.ox, 10) && near(v.oy, -5), true);
+
+    // zoom 2: the world point fit puts at the center stays at the center
+    double wx = (w / 2.0 - f.ox) / f.scale, wy = (h / 2.0 - f.oy) / f.scale;
+    View z = apply(Camera{2, 0, 0}, f, w, h);
+    CHECK_EQ(near(z.scale, 6), true);
+    CHECK_EQ(near(wx * z.scale + z.ox, w / 2.0) && near(wy * z.scale + z.oy, h / 2.0), true);
+
+    // pan moves the world: point (wx - px) lands at center
+    View p = apply(Camera{2, 1.5, -2}, f, w, h);
+    CHECK_EQ(near((wx - 1.5) * p.scale + p.ox, w / 2.0) && near((wy + 2) * p.scale + p.oy, h / 2.0), true);
+
+    Camera cur{1, 0, 0}, tgt{4, 10, -10};
+    bool no_over = true;
+    for (int k = 0; k < 200; ++k) {
+        cur = ease(cur, tgt, 1.0 / 60);
+        no_over = no_over && cur.zoom <= tgt.zoom && cur.px <= tgt.px && cur.py >= tgt.py;
+    }
+    CHECK_EQ(no_over, true);
+    CHECK_EQ(std::fabs(cur.zoom - 4) < 1e-6 && std::fabs(cur.px - 10) < 1e-6, true);
+    Camera big = ease(Camera{1, 0, 0}, tgt, 100);  // huge dt: lands, never past
+    CHECK_EQ(big.zoom <= 4 && big.px <= 10, true);
+    Camera still = ease(Camera{2, 1, 1}, tgt, 0);
+    CHECK_EQ(still.zoom, 2.0);
+}
+
+static std::string join(const std::vector<std::string>& v) {
+    std::string s;
+    for (const std::string& l : v) s += l + "|";
+    return s;
+}
+
+static void test_html_text() {
+    CHECK_EQ(join(html_to_lines("<html><head><title>T</title></head><body>"
+                                "<SCRIPT>var x = '<p>no</p>';</script><style>p{}</style>hi</body>")),
+             std::string("hi|"));
+    CHECK_EQ(join(html_to_lines("<H2 class=x>Title</h2><p>Body  text\n here</p>")),
+             std::string("# Title||Body text here|"));
+    CHECK_EQ(join(html_to_lines("<ul><li>x</li><li> y <b>z</b></li></ul>")), std::string("- x|- y z|"));
+    CHECK_EQ(join(html_to_lines("see <img src=a.png alt=\"cat\"> now")), std::string("see [IMG cat] now|"));
+    CHECK_EQ(join(html_to_lines("<a href='/x'>link &amp; more</a>")), std::string("link & more|"));
+    CHECK_EQ(join(html_to_lines("&lt;a&gt; &quot;q&quot; &#39;s&#39; a&nbsp;b &#65;&#x42; &bogus; &#x263A;")),
+             std::string("<a> \"q\" 's' a b AB &bogus; &#x263A;|"));
+    CHECK_EQ(join(html_to_lines("a<br><br><br><br>b<p></p><p></p><div></div><p>c</p>")),
+             std::string("a||b||c|"));
+    CHECK_EQ(join(html_to_lines("<p>x</p><pre>\n  int  a;\n\n  b &lt; c\n</pre>y")),
+             std::string("x||  int  a;||  b < c||y|"));
+    std::string big;
+    for (int k = 0; k < 3000; ++k) big += "line<br>";
+    CHECK_EQ(html_to_lines(big).size(), size_t(2000));
+    CHECK_EQ(html_to_lines("").size(), size_t(0));
+}
+
 int main() {
     test_layout();
     test_fit();
     test_short_label();
     test_replay();
+    test_camera();
+    test_html_text();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }
