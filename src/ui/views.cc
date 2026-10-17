@@ -96,15 +96,13 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
                             int(std::lround(sy(0) + r * std::sin(a))), true, th::kFaint);
             }
         }
-        // Edges next, so nodes and labels sit on top. Cross-links (seen) only
-        // while the graph is small; past that they are mostly braille mush.
-        const bool draw_seen = g.nodes.size() <= 40;
+        // Edges next, so nodes and labels sit on top. Cross-links (seen) always
+        // drawn: the dense core is the look Tony wants (decision 2026-10-17).
         for (size_t e = 0; e < g.edges.size() && e < f.edge_t.size(); ++e) {
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
             if (t <= 0) continue;
             int a = g.id_of(g.edges[e].from), b = g.id_of(g.edges[e].to);
             if (!shown(a) || !shown(b)) continue;
-            if (g.edges[e].seen && !draw_seen) continue;
             int x1 = int(std::lround(sx(a))), y1 = int(std::lround(sy(a)));
             int x2 = int(std::lround(sx(a) + (sx(b) - sx(a)) * t));
             int y2 = int(std::lround(sy(a) + (sy(b) - sy(a)) * t));

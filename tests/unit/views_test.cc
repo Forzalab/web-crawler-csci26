@@ -171,7 +171,7 @@ static void test_seen_edges_cap() {
     Fake small = build(0), big = build(38);  // 3 and 41 nodes
     std::string s = mid(small), l = mid(big);
     CHECK(s.find_first_not_of(' ') != std::string::npos, s);
-    CHECK(l.find_first_not_of(' ') == std::string::npos, l);
+    CHECK(l.find_first_not_of(' ') != std::string::npos, l);  // cross-links always on
 }
 
 static void test_boss_bar() {
