@@ -49,6 +49,13 @@ struct LoadingState {
     float pulse = 1;
     int cols = 80;      // terminal width: the box is min(64, cols - 2) wide
     Progress progress;
+    // Checklist fades: a new line fades in (faint -> its colour, 400 ms, ease-out,
+    // timed from FetchLine::at_ms); with a full list the oldest (top) line fades
+    // out over 400 ms since the newest landed, before it scrolls off.
+    // fade = false (--no-anim / NO_COLOR): every line at its final colour.
+    bool fade = false;
+    int64_t now_ms = 0;  // anim::now_ms()
+    int rows = 0;        // list capacity (loading_rows); 0 = never treat it as full
 };
 int loading_rows(int term_h);
 ftxui::Element loading(const LoadingState& s, ftxui::Element background);

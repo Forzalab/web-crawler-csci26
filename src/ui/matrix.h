@@ -10,6 +10,12 @@
 // render() fills whatever box it is given (no min size, safe at 0x0) and only
 // writes the cells that hold a glyph, so it never erases what is under it.
 // Cost: O(w*h) per frame, no allocations beyond the one Element node.
+//
+// Intensity (0..1, default 1 = the full rain): at 0 only a few sparse columns
+// fall, slowly, with short tails and a handful of glyphs; columns join in a
+// fixed (seeded) order as it rises, speed / tail length / glyph variety grow
+// with it. Still a pure function of (seed, frame, intensity). Ramp it smoothly
+// over time (the loading screen: anim::smoothstep over ~8 s), not in jumps.
 #pragma once
 
 #include <cstdint>
@@ -36,7 +42,8 @@ struct RainCell {
 };
 
 // The pure core. Out-of-range (x<0, y<0, y>=h, h<=0) -> empty cell.
-RainCell cell_at(uint32_t seed, uint64_t frame, int x, int y, int h, Glyphs g);
+// intensity >= 1 is exactly the full rain (same cells as before intensity existed).
+RainCell cell_at(uint32_t seed, uint64_t frame, int x, int y, int h, Glyphs g, float intensity = 1.0f);
 
 class MatrixRain {
 public:
@@ -45,11 +52,13 @@ public:
     void resize(int w, int h) { w_ = w < 0 ? 0 : w, h_ = h < 0 ? 0 : h; }  // only used by cell()
     void tick() { ++frame_; }
     void set_frame(uint64_t f) { frame_ = f; }
+    void set_intensity(float i) { intensity_ = i >= 0 && i <= 1 ? i : i < 0 ? 0 : 1; }  // NaN -> 1
 
     uint64_t frame() const { return frame_; }
     int width() const { return w_; }
     int height() const { return h_; }
     Glyphs glyphs() const { return glyphs_; }
+    float intensity() const { return intensity_; }
 
     // Cell of the last resize() grid; empty when out of bounds.
     RainCell cell(int x, int y) const;
@@ -61,6 +70,7 @@ private:
     uint32_t seed_;
     Glyphs glyphs_;
     uint64_t frame_ = 0;
+    float intensity_ = 1.0f;
     int w_ = 0, h_ = 0;
 };
 
