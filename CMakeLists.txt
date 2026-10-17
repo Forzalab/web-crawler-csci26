@@ -98,6 +98,11 @@ add_executable(wc_graph_test tests/unit/graph_test.cc)
 target_link_libraries(wc_graph_test PRIVATE wc_core)
 target_compile_options(wc_graph_test PRIVATE -Wall -Wextra)
 
+# Crawl regression (BFS empty-queue front()). Not in `make unit` until crawl.cc is fixed: make crawl-regress
+add_executable(wc_crawl_test tests/unit/crawl_test.cc)
+target_link_libraries(wc_crawl_test PRIVATE wc_core)
+target_compile_options(wc_crawl_test PRIVATE -Wall -Wextra)
+
 add_executable(wc_ui_test tests/unit/ui_test.cc)        # layout + replay
 target_link_libraries(wc_ui_test PRIVATE wc_ui_logic)
 add_executable(wc_query_test tests/unit/query_test.cc)  # omnibar + osc52
