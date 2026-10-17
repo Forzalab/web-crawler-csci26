@@ -28,4 +28,9 @@ View fit(const Layout& l, int w, int h);
 // "https://www.google.com/maps?x" -> "google.com" (host, no www., no port)
 std::string short_label(const std::string& url);
 
+// Graph label: host if url's host differs from root's, else "/" + last
+// non-empty path segment ("/domains"); root (or bare path) -> host.
+// Capped at 14 columns, "…" on the last one.
+std::string node_label(const std::string& url, const std::string& root_url);
+
 }  // namespace wc

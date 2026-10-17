@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <set>
+#include <utility>
 
 #include <ftxui/dom/canvas.hpp>
 #include <ftxui/dom/node.hpp>
@@ -94,40 +96,70 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
                             int(std::lround(sy(0) + r * std::sin(a))), true, th::kFaint);
             }
         }
-        // Edges next, so nodes and labels sit on top.
+        // Edges next, so nodes and labels sit on top. Cross-links (seen) only
+        // while the graph is small; past that they are mostly braille mush.
+        const bool draw_seen = g.nodes.size() <= 40;
         for (size_t e = 0; e < g.edges.size() && e < f.edge_t.size(); ++e) {
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
             if (t <= 0) continue;
             int a = g.id_of(g.edges[e].from), b = g.id_of(g.edges[e].to);
             if (!shown(a) || !shown(b)) continue;
+            if (g.edges[e].seen && !draw_seen) continue;
             int x1 = int(std::lround(sx(a))), y1 = int(std::lround(sy(a)));
             int x2 = int(std::lround(sx(a) + (sx(b) - sx(a)) * t));
             int y2 = int(std::lround(sy(a) + (sy(b) - sy(a)) * t));
             Color col = g.edges[e].seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth));
             dotted(c, x1, y1, x2, y2, col);
         }
-        // Nodes: glyph (+ label for depth < 3), snapped to cells.
+        // Nodes: glyph (+ label for depth < 2), snapped to cells. Labels go in
+        // id order (shallow first); one that would overlap a glyph or an
+        // earlier label is skipped, its own glyph still drawn.
+        const std::string root_url = g.nodes.empty() ? "" : g.nodes[0].url;
+        std::set<std::pair<int, int>> taken;  // (col, row) cells under labels
+        auto cols = [](const std::string& s) {
+            int n = 0;
+            for (unsigned char ch : s) n += (ch & 0xC0) != 0x80;
+            return n;
+        };
+        auto claim = [&](int col, int row, int w) {
+            for (int i = 0; i < w; ++i)
+                if (taken.count({col + i, row})) return false;
+            for (int i = 0; i < w; ++i) taken.insert({col + i, row});
+            return true;
+        };
+        auto drawn = [&](size_t id) { return shown(int(id)) && f.node_t[id] >= 1.0f; };
+        auto cx_of = [&](size_t id) { return int(std::lround(sx(int(id)))) / 2 * 2; };
+        auto cy_of = [&](size_t id) { return int(std::lround(sy(int(id)))) / 4 * 4; };
+        // Pass 1: glyphs, each claiming its cell so no label paints over one.
         for (size_t id = 0; id < g.nodes.size(); ++id) {
-            if (!shown(int(id)) || f.node_t[id] < 1.0f) continue;
+            if (!drawn(id)) continue;
             const Node& n = g.nodes[id];
-            int x = int(std::lround(sx(int(id)))) / 2 * 2;
-            int y = int(std::lround(sy(int(id)))) / 4 * 4;
+            int x = cx_of(id), y = cy_of(id);
             Color col = n.status == Status::Failed ? th::kChrome : th::depth_color(n.depth);
             bool root = id == 0;
             c.DrawText(x, y, th::glyph(n.depth, n.status), [col, root](Cell& p) {
                 p.foreground_color = col;
                 p.bold = root;
             });
-            if (n.depth > 1) continue;  // labels for root + depth 1 only
-            std::string lab = short_label(n.url);
+            taken.insert({x / 2, y / 4});
+        }
+        // Pass 2: labels, root + depth 1 only, in id order.
+        for (size_t id = 0; id < g.nodes.size(); ++id) {
+            if (!drawn(id) || g.nodes[id].depth > 1) continue;
+            int x = cx_of(id), y = cy_of(id);
+            bool root = id == 0;
+            std::string lab = node_label(g.nodes[id].url, root_url);
+            int w = cols(lab);
             auto white = [root](Cell& p) {
                 p.foreground_color = th::kText;
                 p.bold = root;
             };
-            if (root)  // centred under the glyph
-                c.DrawText(std::max(0, x - int(lab.size()) / 2 * 2), y + 4, lab, white);
-            else
+            if (root) {  // centred under the glyph
+                int cx = std::max(0, x / 2 - w / 2);
+                if (claim(cx, y / 4 + 1, w)) c.DrawText(cx * 2, y + 4, lab, white);
+            } else if (claim(x / 2 + 1, y / 4, w + 1)) {
                 c.DrawText(x + 2, y, " " + lab, white);  // space clears edge dots
+            }
         }
     });
 }

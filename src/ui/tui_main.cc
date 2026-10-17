@@ -117,7 +117,7 @@ int tui_main(int argc, char** argv) {
     int prompt_cursor = 0, omni_cursor = 0;
     InputOption url_opt, prompt_opt, omni_opt;
     url_opt.placeholder = "Paste a URL. Enter to crawl.";
-    omni_opt.placeholder = "search · /help";
+    omni_opt.placeholder = "";  // ghost carries the hint (main_screen)
     url_opt.multiline = prompt_opt.multiline = omni_opt.multiline = false;
     prompt_opt.cursor_position = &prompt_cursor;
     omni_opt.cursor_position = &omni_cursor;
@@ -159,7 +159,8 @@ int tui_main(int argc, char** argv) {
     };
     auto refresh_hits = [&] {
         Query q = parse_query(omni_text);
-        hits = q.verb.empty() ? match(g, q) : std::vector<int>{};
+        bool idle = q.verb.empty() && q.text.empty() && q.depth_op == 0 && !q.status;
+        hits = q.verb.empty() && !idle ? match(g, q) : std::vector<int>{};  // empty query: ghost only
         selected = std::clamp(selected, 0, std::max(0, int(hits.size()) - 1));
     };
 
@@ -221,18 +222,19 @@ int tui_main(int argc, char** argv) {
         } else {
             for (int id : hits) {
                 const Node& n = g.nodes[id];
-                rows.push_back(std::string(th::glyph(n.depth, n.status)) + " " + short_label(n.url) + "  d" + std::to_string(n.depth));
+                rows.push_back(std::string(th::glyph(n.depth, n.status)) + " " + node_label(n.url, g.nodes[0].url) + "  d" + std::to_string(n.depth));
             }
         }
         std::string ghost = complete(omni_text);
         ghost = ghost.size() > omni_text.size() ? ghost.substr(omni_text.size()) : "";
+        if (omni_text.empty()) ghost = "type to search \u00b7 /bridges";
 
-        // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar + omnibar.
+        // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar (2) + omnibar (3 + results).
         auto ts = Terminal::Size();
-        int rows_left = std::max(1, ts.dimy - 2 - int(rows.size()) - 1);
+        int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()));
         View v = fit(lay, ts.dimx * 2, rows_left * 4);
 
-        Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs), separator() | color(th::kFaint),
+        Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
                              views::graph(g, lay, f, v) | flex,
                              views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost)});
         if (toast_live)

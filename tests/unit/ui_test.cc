@@ -94,6 +94,14 @@ static void test_short_label() {
     CHECK_EQ(short_label("WWW.Foo.org"), std::string("foo.org"));
     CHECK_EQ(short_label("https://sub.site.io?q=1#f"), std::string("sub.site.io"));
     CHECK_EQ(short_label("https://[::1]:443/x"), std::string("[::1]"));
+    const std::string root = "https://www.iana.org/";
+    CHECK_EQ(node_label(root, root), std::string("iana.org"));
+    CHECK_EQ(node_label("https://www.iana.org/domains", root), std::string("/domains"));
+    CHECK_EQ(node_label("https://iana.org/a/b/?x=1", root), std::string("/b"));
+    CHECK_EQ(node_label("https://www.iana.org/?q", root), std::string("iana.org"));
+    CHECK_EQ(node_label("https://www.icann.org/x", root), std::string("icann.org"));
+    CHECK_EQ(node_label("https://iana.org/abcdefghijklmnopqrstu", root), std::string("/abcdefghijkl\u2026"));
+    CHECK_EQ(node_label("https://a-very-long-host-name.org/", root), std::string("a-very-long-h\u2026"));
 }
 
 static void test_replay() {

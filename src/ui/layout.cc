@@ -98,4 +98,23 @@ std::string short_label(const std::string& url) {
     return s;
 }
 
+std::string node_label(const std::string& url, const std::string& root_url) {
+    std::string host = short_label(url), lab = host;
+    if (url != root_url && host == short_label(root_url)) {
+        std::string s = url;
+        size_t p = s.find("://");
+        if (p != std::string::npos) s = s.substr(p + 3);
+        size_t slash = s.find('/'), q = s.find_first_of("?#");
+        std::string path;
+        if (slash != std::string::npos && (q == std::string::npos || slash < q))
+            path = s.substr(slash, q == std::string::npos ? std::string::npos : q - slash);
+        while (!path.empty() && path.back() == '/') path.pop_back();
+        size_t last = path.rfind('/');
+        if (last != std::string::npos && last + 1 < path.size()) lab = path.substr(last);
+    }
+    const size_t kMax = 14;
+    if (lab.size() > kMax) lab = lab.substr(0, kMax - 1) + "\u2026";
+    return lab;
+}
+
 }  // namespace wc

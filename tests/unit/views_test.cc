@@ -105,6 +105,75 @@ static void test_graph() {
     CHECK_LACKS(out, "google.com");
 }
 
+static std::string line_of(const std::string& out, int row) {
+    size_t b = 0;
+    for (int i = 0; i < row && b != std::string::npos; ++i) b = out.find('\n', b) + 1;
+    return b == std::string::npos ? "" : out.substr(b, out.find('\n', b) - b);
+}
+
+// Same-site crawl: path labels, root centred under its glyph, overlaps skipped.
+static void test_graph_same_site() {
+    Fake k;
+    k.g.add_node("https://www.iana.org/", 0);
+    k.g.add_node("https://www.iana.org/domains", 1);
+    k.g.add_node("https://www.iana.org/about/", 1);  // same spot as /domains
+    k.g.add_node("https://www.icann.org/x", 1);
+    for (int i = 1; i < 4; ++i) k.g.add_edge(k.g.nodes[0].url, k.g.nodes[i].url, false);
+    k.l.pos = {{0, 0}, {1, -1}, {1, -1}, {-1.5, -1}};
+    k.l.parent = {-1, 0, 0, 0};
+    k.f.node_t = {1, 1, 1, 1};
+    k.f.edge_t = {1, 1, 1};
+    k.f.done = true;
+    std::string out = render(views::graph(k.g, k.l, k.f, View{20, 80, 48}));
+    CHECK_HAS(out, "/domains");
+    CHECK_LACKS(out, "/about");     // collides with /domains, which came first
+    CHECK_HAS(out, "icann.org");    // other host: host label
+    // root glyph at col 40 row 12; "iana.org" (8 cols) centred under it: cols 36..43
+    std::string under = line_of(out, 13);
+    CHECK(under.find("iana.org") != std::string::npos, out);
+    CHECK(line_of(out, 12).find("◆") != std::string::npos, out);
+    size_t p = under.find("iana.org"), cols = 0;
+    for (size_t i = 0; i < p; ++i) cols += (static_cast<unsigned char>(under[i]) & 0xC0) != 0x80;
+    CHECK(cols == 36, out);
+}
+
+// Cross-link (seen) edges: drawn up to 40 nodes, skipped beyond.
+static void test_seen_edges_cap() {
+    auto build = [](int extra) {
+        Fake k;
+        k.g.add_node("https://r.test/", 0);
+        k.g.add_node("https://a.test/", 2);  // depth 2: no label in the way
+        k.g.add_node("https://b.test/", 2);
+        k.g.add_edge(k.g.nodes[0].url, k.g.nodes[1].url, false);
+        k.g.add_edge(k.g.nodes[0].url, k.g.nodes[2].url, false);
+        k.g.add_edge(k.g.nodes[1].url, k.g.nodes[2].url, true);
+        k.l.pos = {{0, 0}, {-2, 2}, {2, 2}};
+        k.l.parent = {-1, 0, 0};
+        for (int i = 0; i < extra; ++i) {
+            k.g.add_node("https://x" + std::to_string(i) + ".test/", 2);
+            k.l.pos.push_back({0, 0});
+            k.l.parent.push_back(0);
+        }
+        k.f.node_t.assign(k.g.nodes.size(), 0);
+        k.f.node_t[0] = k.f.node_t[1] = k.f.node_t[2] = 1;
+        k.f.edge_t = {1, 1, 1};
+        k.f.done = true;
+        return k;
+    };
+    auto mid = [](Fake& k) {  // row 10 (y=2), cols 32..48: only the seen edge passes there
+        std::string row = line_of(render(views::graph(k.g, k.l, k.f, View{10, 80, 20})), 10);
+        size_t b = 0, col = 0;
+        while (b < row.size() && col < 32) col += (static_cast<unsigned char>(row[b++]) & 0xC0) != 0x80;
+        size_t e = b;
+        while (e < row.size() && col < 48) col += (static_cast<unsigned char>(row[e++]) & 0xC0) != 0x80;
+        return row.substr(b, e - b);
+    };
+    Fake small = build(0), big = build(38);  // 3 and 41 nodes
+    std::string s = mid(small), l = mid(big);
+    CHECK(s.find_first_not_of(' ') != std::string::npos, s);
+    CHECK(l.find_first_not_of(' ') == std::string::npos, l);
+}
+
 static void test_boss_bar() {
     std::string out = render(views::boss_bar(2, 3, 40, 200, false, false), 80, 2);
     CHECK_HAS(out, "DEPTH");
@@ -113,6 +182,7 @@ static void test_boss_bar() {
     CHECK_HAS(out, "40/200");
     CHECK_HAS(out, "▰");
     CHECK_HAS(out, "─");  // rule under the bar
+    CHECK(out.find("─") >= out.find("\n"), out);  // ...exactly one: row 2 only
     CHECK_LACKS(out, "LIMIT");
     out = render(views::boss_bar(3, 3, 200, 200, true, false), 80, 2);
     CHECK_HAS(out, "LIMIT");
@@ -161,6 +231,8 @@ static void dump_main() {
 int main() {
     test_theme();
     test_graph();
+    test_graph_same_site();
+    test_seen_edges_cap();
     test_boss_bar();
     test_omnibar();
     test_toast_too_small();
