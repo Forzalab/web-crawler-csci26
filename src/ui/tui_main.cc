@@ -81,8 +81,9 @@ std::string bridges_url() {
 }
 
 // Centered prompt column: question, the live input, a dim footer.
+// The blank top row balances the footer row, so the body is centred on the whole screen.
 Element step_screen(Element body, const std::string& footer) {
-    return vbox({filler(), hcenter(std::move(body)), filler(),
+    return vbox({text(""), filler(), hcenter(std::move(body)), filler(),
                  hcenter(text(footer) | color(th::kChrome) | dim)}) |
            flex;
 }
@@ -92,14 +93,12 @@ Element url_screen(const std::vector<std::string>& chips, Element input) {
     for (const auto& c : chips) {
         chip_row.push_back(text("[ " + short_label(c) + " ✕ ] ") | color(th::kAccent));
     }
-    return step_screen(vbox({hbox(std::move(chip_row)),
-                             views::input_box(hbox({text("› ") | bold | color(th::kAccent),
-                                                    std::move(input) | size(WIDTH, EQUAL, 50)}))}),
+    return step_screen(vbox({hbox(std::move(chip_row)), views::field("", std::move(input), 50)}),
                        "Enter crawl · Tab add URL · Esc quit");
 }
 
 Element prompt_screen(const std::string& q, Element input, const std::string& footer = "Enter accept default · Esc quit") {
-    return step_screen(hbox({text(q + "  ") | bold | color(th::kText), views::input_box(std::move(input) | size(WIDTH, EQUAL, 8))}), footer);
+    return step_screen(views::field(q, std::move(input), 8), footer);
 }
 
 Element summary_screen(const CrawlGraph& g) {
@@ -138,10 +137,12 @@ int tui_main(int argc, char** argv) {
     std::vector<std::string> chips;
     std::string url_text, prompt_text, omni_text;
     int prompt_cursor = 0, omni_cursor = 0;
-    InputOption url_opt, prompt_opt, omni_opt;
+    InputOption base;  // shared by every input: views::input_text look, one line
+    base.transform = [](InputState s) { return views::input_text(std::move(s.element), s.is_placeholder); };
+    base.multiline = false;
+    InputOption url_opt = base, prompt_opt = base, omni_opt = base;
     url_opt.placeholder = "Paste a URL. Enter to crawl.";
     omni_opt.placeholder = "";  // ghost carries the hint (main_screen)
-    url_opt.multiline = prompt_opt.multiline = omni_opt.multiline = false;
     prompt_opt.cursor_position = &prompt_cursor;
     omni_opt.cursor_position = &omni_cursor;
     auto url_in = Input(&url_text, url_opt);
@@ -337,7 +338,7 @@ int tui_main(int argc, char** argv) {
         Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
                              views::graph(g, lay, f, v) | flex,
                              views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost)});
-        // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast.
+        // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast (top right, under the boss bar).
         if (pv_open) {
             pv_scroll = std::clamp(pv_scroll, 0, std::max(0, int(pv_lines.size()) - 1));
             Element p = views::preview(pv_title, pv_lines, pv_scroll, glow, pv_max);
@@ -349,8 +350,8 @@ int tui_main(int argc, char** argv) {
             body = dbox({body, vbox({filler(), hbox({filler(), c, filler()}),
                                      emptyElement() | size(HEIGHT, EQUAL, 3 + extra + int(rows.size()))})});
         }
-        if (toast_live)
-            body = dbox({body, vbox({hbox({filler(), views::toast(toast_text)}), filler()})});
+        if (toast_live)  // under the boss bar (2 rows), right edge in line with its PAGES meter
+            body = dbox({body, vbox({emptyElement() | size(HEIGHT, EQUAL, 2), hbox({filler(), views::toast(toast_text), text(" ")}), filler()})});
         return body;
     };
 

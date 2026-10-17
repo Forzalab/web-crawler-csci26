@@ -115,7 +115,7 @@ target_link_libraries(wc_ui_test PRIVATE wc_ui_logic)
 add_executable(wc_query_test tests/unit/query_test.cc)  # omnibar + osc52
 target_link_libraries(wc_query_test PRIVATE wc_ui_logic)
 add_executable(wc_views_test tests/unit/views_test.cc)  # headless snapshots
-target_link_libraries(wc_views_test PRIVATE wc_ui_views)
+target_link_libraries(wc_views_test PRIVATE wc_ui_views ftxui::component)  # real Input in test_input_colors
 add_executable(wc_matrix_test tests/unit/matrix_test.cc)  # matrix rain
 target_link_libraries(wc_matrix_test PRIVATE wc_ui_views)
 foreach(t wc_ui_test wc_query_test wc_views_test wc_matrix_test)

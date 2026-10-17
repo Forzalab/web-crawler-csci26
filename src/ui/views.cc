@@ -191,6 +191,17 @@ Element input_box(Element input) {
     return std::move(input) | color(Color::White) | borderStyled(ROUNDED, th::kAccent) | bgcolor(Color::Black);
 }
 
+Element input_text(Element input, bool placeholder) {
+    input = std::move(input) | color(Color::White);
+    return placeholder ? std::move(input) | dim : input;
+}
+
+Element field(const std::string& label, Element input, int width) {
+    Element box = input_box(hbox({text("› ") | bold | color(th::kAccent), std::move(input) | size(WIDTH, EQUAL, width)}));
+    if (label.empty()) return box;
+    return hbox({text(label + " ") | bold | color(th::kText) | vcenter, std::move(box)});  // vcenter: border rows above/below
+}
+
 Element omnibar(Element input, const std::vector<std::string>& results, int selected,
                 const std::string& ghost) {
     Elements rows;
@@ -204,7 +215,8 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
     }
     // Ghost: first line trails the input; further lines (placeholder) sit dim inside the box.
     std::string first = ghost.substr(0, ghost.find('\n'));
-    Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input), text(first) | color(th::kChrome), filler()})};
+    // Input never grows (Input is xflex): the ghost sits right after the typed text, not mid-box.
+    Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input) | xflex_factor(0, 1), text(first) | color(th::kChrome), filler()})};
     for (size_t p = ghost.find('\n'); p != std::string::npos; p = ghost.find('\n', p + 1))
         box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome) | dim);
     rows.push_back(input_box(vbox(std::move(box))));
@@ -214,7 +226,7 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
 
 Element toast(const std::string& t) {
     return hbox({text("✓ ") | bold | color(th::kAccent), text(t) | color(th::kText)}) |
-           borderStyled(ROUNDED, th::kChrome);
+           borderStyled(ROUNDED, th::kChrome) | clear_under;  // opaque over the graph
 }
 
 Element too_small(int w, int h) {
@@ -260,11 +272,11 @@ Element coach(int step, int total, const std::string& t) {
                      text("  " + t) | color(th::kText)}),
                text("Tab next · Esc skip") | dim | color(th::kChrome),
            }) |
-           borderStyled(ROUNDED, th::kFaint);
+           borderStyled(ROUNDED, th::kFaint) | clear_under;  // opaque over the graph
 }
 
 int loading_rows(int term_h) {
-    // Rows taken by chrome: border 2, title 2, counters 1, rule 1, footer 1, breathing room 1.
+    // Rows taken by chrome: border 2, title 2, counters 1, rule 1, footer 1, blank top row 1.
     return std::max(1, term_h - 8);
 }
 
@@ -305,7 +317,8 @@ Element loading(const LoadingState& s, Element background) {
     int w = std::clamp(s.cols - 4, 20, 62);
     // clear_under: the box is opaque, so a background layer (rain) never shows through the text.
     Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge) | clear_under;
-    Element content = vbox({filler(), hcenter(box), filler(), hcenter(text("Esc quit") | color(th::kChrome) | dim)}) | flex;
+    // Blank top row balances the footer row (same rule as the prompt screens).
+    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc quit") | color(th::kChrome) | dim)}) | flex;
     return dbox({std::move(background), std::move(content)});
 }
 
