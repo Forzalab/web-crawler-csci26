@@ -73,6 +73,7 @@ target_compile_options(wc_ui_logic PRIVATE -Wall -Wextra)
 add_library(wc_ui_views STATIC
   src/ui/views.cc
   src/ui/theme.cc
+  src/ui/matrix.cc
 )
 target_link_libraries(wc_ui_views PUBLIC wc_ui_logic ftxui::dom ftxui::screen)
 target_compile_options(wc_ui_views PRIVATE -Wall -Wextra)
@@ -84,6 +85,7 @@ add_executable(wc
   src/ui/tui_main.cc
   src/ui/fixture_source.cc
   src/ui/links_main.cc
+  src/ui/matrix_demo.cc            # WC_MATRIX_DEMO=1 (hidden)
   src/adapters/josh_fetcher.cc
   src/adapters/logan_renderer.cc
   src/team/josh.cc                 # #1 Josh writes here
@@ -111,7 +113,9 @@ add_executable(wc_query_test tests/unit/query_test.cc)  # omnibar + osc52
 target_link_libraries(wc_query_test PRIVATE wc_ui_logic)
 add_executable(wc_views_test tests/unit/views_test.cc)  # headless snapshots
 target_link_libraries(wc_views_test PRIVATE wc_ui_views)
-foreach(t wc_ui_test wc_query_test wc_views_test)
+add_executable(wc_matrix_test tests/unit/matrix_test.cc)  # matrix rain
+target_link_libraries(wc_matrix_test PRIVATE wc_ui_views)
+foreach(t wc_ui_test wc_query_test wc_views_test wc_matrix_test)
   target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 

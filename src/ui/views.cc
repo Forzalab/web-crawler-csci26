@@ -286,7 +286,8 @@ Element loading(const LoadingState& s, Element background) {
     }
     // Fixed width (no wobble as longer labels land), every line clipped to it; border adds 2.
     int w = std::clamp(s.cols - 4, 20, 62);
-    Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge);
+    // clear_under: the box is opaque, so a background layer (rain) never shows through the text.
+    Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge) | clear_under;
     Element content = vbox({filler(), hcenter(box), filler(), hcenter(text("Esc quit") | color(th::kChrome) | dim)}) | flex;
     return dbox({std::move(background), std::move(content)});
 }
