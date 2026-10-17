@@ -32,6 +32,7 @@ smoke: all
 
 smoke-offline: all
 	BIN=$(BUILD)/wc tests/smoke/run.sh --offline $(FILTER)
+	BIN=$(BUILD)/wc tests/smoke/tear_check.sh
 
 smoke-live: all
 	BIN=$(BUILD)/wc tests/smoke/run.sh --live $(FILTER)

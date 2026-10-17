@@ -16,6 +16,12 @@ tests/smoke/run.sh '^off_dense' --offline
 
 Exit code is 1 if any case is CRASH or HANG (offline runs: ERR too).
 
+`make smoke-offline` also runs `tests/smoke/tear_check.sh` (needs `strace`; SKIP without):
+the TUI under strace at 120x40, 60x30 and a Ctrl-C quit. Every `write(2)` to stdout must be
+one whole frame inside `CSI ?2026h` ... `CSI ?2026l` (synchronized output, `src/ui/term_lock.h`),
+no `CSI 2J`, alt screen + hidden cursor + mouse on at start, all restored on exit.
+Raw traces: `build/smoke/tear/<case>/trace.txt`.
+
 ## Verdicts
 
 | verdict | meaning |
