@@ -3,7 +3,7 @@
 //   depth:2 depth:<3     depth filter (= < >)
 //   status:failed        fetched | failed | unfetched
 //   wiki status:failed   mix freely
-//   /bridges /help /quit verbs (first token starts with '/')
+//   /bridges /resume /help /quit   verbs (first token starts with '/')
 #pragma once
 
 #include <optional>

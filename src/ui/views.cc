@@ -318,7 +318,7 @@ Element loading(const LoadingState& s, Element background) {
     // clear_under: the box is opaque, so a background layer (rain) never shows through the text.
     Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge) | clear_under;
     // Blank top row balances the footer row (same rule as the prompt screens).
-    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc quit") | color(th::kChrome) | dim)}) | flex;
+    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc stop · Ctrl-C quit") | color(th::kChrome) | dim)}) | flex;
     return dbox({std::move(background), std::move(content)});
 }
 

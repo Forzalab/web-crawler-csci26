@@ -17,7 +17,7 @@ const char* const kLines[] = {
     "following links so you don't have to…",
     "counting hops from home…",
     "politely knocking on servers…",
-    "sleeping 100 ms between requests…",
+    "16 fetchers, one polite crawler…",
     "dusting off old hyperlinks…",
     "reading HTML so you won't…",
     "sorting NEW from SEEN…",
@@ -30,7 +30,7 @@ const char* const kLines[] = {
     "peeking behind the <a href>…",
     "warming up the cache…",
     "respecting the crawl delay…",
-    "one page at a time, honest…",
+    "Esc stops, /resume picks it up…",
     "mapping the neighbourhood…",
 };
 

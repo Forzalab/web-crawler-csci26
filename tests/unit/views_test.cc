@@ -396,7 +396,7 @@ static void test_loading() {
     CHECK_HAS(out, "✓ iana.org/");
     CHECK_HAS(out, "✓ iana.org/domains");
     CHECK_HAS(out, "✗ ext.com/very/long");
-    CHECK_HAS(out, "Esc quit");
+    CHECK_HAS(out, "Esc stop · Ctrl-C quit");
     CHECK_HAS(out, "╭");
     // Newest at the bottom, and the long line is clipped to the box (<= 64 inside the border).
     CHECK(out.find("✓ iana.org/domains") < out.find("✗ ext.com"), out);
@@ -406,7 +406,7 @@ static void test_loading() {
     out = render(views::loading(st, emptyElement()), 50, 20);
     CHECK_HAS(out, "untangling the web…");
     CHECK_HAS(out, "✗ ext.com");
-    CHECK_HAS(out, "Esc quit");
+    CHECK_HAS(out, "Esc stop · Ctrl-C quit");
     size_t tl = out.find("╭");
     CHECK(tl != std::string::npos && out.find("╮", tl) < out.find('\n', tl), out);  // right edge on screen
     st.cols = 80;
@@ -424,7 +424,7 @@ static void test_loading() {
         CHECK_HAS(out, "│   crawling iana.org ");
         CHECK_HAS(out, "│ pages 3  links 40  fail 1  depth 1 ");
         CHECK_HAS(out, "│ ✓ iana.org/domains ");
-        CHECK_HAS(out, "Esc quit");
+        CHECK_HAS(out, "Esc stop · Ctrl-C quit");
         size_t top = out.find("╭");
         CHECK(top != std::string::npos && out.substr(0, top).find_first_not_of(" \n") != std::string::npos, out);
         // Every box row (border to border) is byte-identical to the render with no background.

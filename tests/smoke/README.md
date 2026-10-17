@@ -22,6 +22,10 @@ one whole frame inside `CSI ?2026h` ... `CSI ?2026l` (synchronized output, `src/
 no `CSI 2J`, alt screen + hidden cursor + mouse on at start, all restored on exit.
 Raw traces: `build/smoke/tear/<case>/trace.txt`.
 
+It also runs `tests/smoke/stop_resume.sh`: a slow offline crawl (tree1111, 400 ms per fetch),
+Esc on the loading screen must show the graph within 2 s with fewer than 1000 pages, `/resume`
+must reach `PAGES 1000/1000`, Esc x5 exits 0; Ctrl-C mid-crawl must exit with the alt screen off.
+
 ## Verdicts
 
 | verdict | meaning |

@@ -83,7 +83,7 @@ std::vector<int> match(const CrawlGraph& g, const Query& q, size_t limit) {
 }
 
 std::string complete(const std::string& line) {
-    static const char* verbs[] = {"/bridges", "/help", "/quit"};
+    static const char* verbs[] = {"/bridges", "/help", "/quit", "/resume"};
     static const char* filters[] = {"depth:", "status:fetched", "status:failed", "status:unfetched"};
     if (line.empty() || std::isspace((unsigned char)line.back())) return "";
     size_t cut = line.find_last_of(' ');

@@ -5,6 +5,8 @@
 // Zoom keys that also work mid-typing (Termux extra-keys row): PgUp in, PgDn out (preview closed).
 // Every frame is one bracketed write (ui/term_lock.h): no row-by-row redraw.
 // Enter on a result opens its page preview (cache, else live fetch).
+// Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
+// and shows the graph so far; /resume crawls on into the same graph.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -52,6 +54,8 @@ namespace {
 
 // Zoom keys, shown under the omnibar and in /help. + - 0 Home need an empty omnibar.
 constexpr const char* kZoomHint = "zoom + - 0 · PgUp PgDn";
+
+constexpr int kWorkers = 16;  // parallel fetches; pacing per host is the fetcher's (robots, Crawl-delay, 429)
 
 // Onboarding coach marks, first run only. Copy lives here so it is easy to rewrite.
 const std::vector<std::string> kCoach = {
@@ -130,6 +134,7 @@ int tui_main(int argc, char** argv) {
     Step step = Step::Url;
     CrawlConfig cfg;
     cfg.maxSize = 50;
+    cfg.workers = kWorkers;
     bool visualize = first_run;
 
     // URL step. MVP: only chips[0] (or the typed URL) is crawled.
@@ -167,7 +172,10 @@ int tui_main(int argc, char** argv) {
     std::string start;
     CrawlGraph g;
     std::thread worker, ticker;
-    std::atomic<bool> crawl_done{false}, quitting{false};
+    std::atomic<bool> crawl_done{false}, quitting{false}, stop_crawl{false};
+    cfg.cancel = &stop_crawl;  // Esc on the loading screen
+    bool resumed = false;      // last crawl was a /resume: no replay
+    bool stopped_once = false;  // a stop leaves fetches running on detached threads: _Exit at the end
     int tick = 0;
     matrix::MatrixRain rain;  // loading-screen backdrop, one frame per ticker tick
     Clock::time_point crawl_t0;
@@ -217,11 +225,13 @@ int tui_main(int argc, char** argv) {
         prompt_cursor = int(def.size());
         tab = 1;
     };
-    auto start_crawl = [&] {
+    auto start_crawl = [&](bool resume) {
         step = Step::Crawling;
         crawl_t0 = Clock::now();
-        worker = std::thread([&] {
-            CrawlGraph r = crawl(start, cfg, tap, pause);
+        crawl_done = stop_crawl = false;
+        resumed = resume;
+        worker = std::thread([&, resume, base = resume ? g : CrawlGraph{}]() mutable {
+            CrawlGraph r = resume ? resume_crawl(std::move(base), cfg, tap) : crawl(start, cfg, tap, pause);
             screen.Post([&, r = std::move(r)]() mutable {
                 g = std::move(r);
                 crawl_done = true;
@@ -239,6 +249,11 @@ int tui_main(int argc, char** argv) {
         worker.join();
         ticker.join();
         std::ofstream(seen_path()) << "1\n";
+        int left = pending(g, cfg.maxDepth);
+        if (stop_crawl && left > 0) {
+            stopped_once = true;
+            toast("stopped · " + std::to_string(left) + " left · /resume");
+        }
         if (!visualize) {
             step = Step::Summary;
             return;
@@ -283,7 +298,7 @@ int tui_main(int argc, char** argv) {
 
     auto main_screen = [&]() -> Element {
         // Slow first fetches, then faster; ends when the old linear replay did.
-        int64_t el = no_anim ? INT64_MAX / 4 : replay_clock(ms_since(t0), replay_total);
+        int64_t el = no_anim || resumed ? INT64_MAX / 4 : replay_clock(ms_since(t0), replay_total);
         ReplayFrame f = replay_at(g, el);
         if (!flashed_depth && f.depth >= cfg.maxDepth) flashed_depth = true, flash_depth_at = Clock::now();
         if (!flashed_size && f.size >= cfg.maxSize) flashed_size = true, flash_size_at = Clock::now();
@@ -403,8 +418,15 @@ int tui_main(int argc, char** argv) {
         Query q = parse_query(omni_text);
         if (q.verb == "quit") return screen.Exit();
         if (q.verb == "help") {
-            toast("wiki · depth:<3 · status:failed · /bridges /help /quit · " + std::string(kZoomHint));
+            toast("wiki · depth:<3 · status:failed · /bridges /resume /help /quit · " + std::string(kZoomHint));
             return set_omni("");
+        }
+        if (q.verb == "resume") {
+            set_omni("");
+            refresh_hits();
+            if (pending(g, cfg.maxDepth) == 0) return toast("nothing to resume");
+            close_preview();
+            return start_crawl(true);
         }
         if (q.verb == "bridges") return void(bridges_shown = true);
         if (q.verb == "close") {
@@ -441,6 +463,7 @@ int tui_main(int argc, char** argv) {
             }
             if (step == Step::Main && coach_step >= 0) return coach_step = -1, true;
             if (step == Step::Main && pv_open) return close_preview(), true;
+            if (step == Step::Crawling) return stop_crawl = true, true;  // graph so far; Ctrl-C quits
             screen.Exit();
             return true;
         }
@@ -478,7 +501,7 @@ int tui_main(int argc, char** argv) {
             case Step::Pages:
                 if (e == Event::Return) {
                     cfg.maxSize = std::max(1, int_or(prompt_text, 50));
-                    start_crawl();
+                    start_crawl(false);
                     return true;
                 }
                 return false;
@@ -544,6 +567,8 @@ int tui_main(int argc, char** argv) {
     screen.Loop(app);
     quitting = true;
     if (ticker.joinable()) ticker.join();
+    std::cout.flush();  // every _Exit below skips TermLock's destructor
+    if (stopped_once) std::_Exit(0);  // detached crawl fetches may still hold the fetchers
     if (pv_busy) std::_Exit(0);  // a preview fetch is mid-network and holds `tls`
     if (pv_worker.joinable()) pv_worker.join();
     if (worker.joinable()) {
