@@ -1,0 +1,32 @@
+# tests/smoke/cases.tsv - one TUI smoke case per line, TAB-separated. '#' = comment.
+# name	url	depth	size	cols	rows	mode(live|offline)	fixture(offline: name in gen_fixtures.py, live: -)	timeout_s
+off_one_1node	https://solo.example/	1	1	80	24	offline	one	30
+off_depth0	https://chain.example/p0	0	1	80	24	offline	chain10	30
+off_chain_d10	https://chain.example/p0	10	30	120	40	offline	chain10	60
+off_star100	https://star.example/	1	100	120	40	offline	star100	60
+off_star100_phone	https://star.example/	3	100	50	40	offline	star100	60
+off_dense100_200x60	https://dense.example/n0	3	100	200	60	offline	dense100	60
+off_dense100_d10_80x24	https://dense.example/n0	10	100	80	24	offline	dense100	60
+off_wikilike_d10_s100	https://wiki.example/wiki/Article_0	10	100	120	40	offline	wikilike600	90
+off_wikilike_d3_s1000	https://wiki.example/wiki/Article_0	3	1000	200	60	offline	wikilike600	120
+off_tree_s1000	https://tree.example/	3	1000	120	40	offline	tree1111	120
+off_unicode_120x40	https://unicode.example/	3	30	120	40	offline	unicode_long	60
+off_unicode_80x24	https://unicode.example/	3	30	80	24	offline	unicode_long	60
+off_many_sites	https://hub.example/	3	100	120	40	offline	many_sites	60
+off_failures	https://broken.example/	1	30	80	24	offline	failures	60
+live_iana_80x24	https://www.iana.org/	1	30	80	24	live	-	180
+live_iana_phone	https://www.iana.org/	1	30	50	40	live	-	180
+live_redirect_http	http://iana.org/	1	30	80	24	live	-	180
+live_404	https://www.iana.org/smoke-test-no-such-page-404	1	30	80	24	live	-	120
+live_nxdomain	https://no-such-host.invalid/	1	30	120	40	live	-	120
+live_unicode_url	https://ja.wikipedia.org/wiki/ウェブクローラ	1	30	120	40	live	-	240
+live_long_url	https://www.iana.org/domains/reserved?smoke=long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-long-query-value-end	1	1	120	40	live	-	120
+live_robots_disallowed	https://en.wikipedia.org/w/index.php?title=Special:Random	1	30	80	24	live	-	120
+live_wiki_d1_s100	https://en.wikipedia.org/	1	100	120	40	live	-	400
+live_wiki_d10_s100	https://en.wikipedia.org/	10	100	120	40	live	-	400
+live_wiki_d10_s1	https://en.wikipedia.org/	10	1	200	60	live	-	120
+live_wiki_d3_s1000	https://en.wikipedia.org/	3	1000	200	60	live	-	1200
+live_google_search	https://www.google.com/search?q=web+crawler	1	30	120	40	live	-	180
+live_espn	https://www.espn.com/	3	30	80	24	live	-	300
+live_wowcubedocs	https://wowcubedocs.com/	3	100	120	40	live	-	400
+live_dwarfdig	https://dwarfdig.com/	3	100	200	60	live	-	400

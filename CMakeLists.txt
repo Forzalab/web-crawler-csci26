@@ -82,6 +82,7 @@ add_executable(wc
   src/main.cc
   src/ui/pipe_main.cc
   src/ui/tui_main.cc
+  src/ui/fixture_source.cc
   src/ui/links_main.cc
   src/adapters/josh_fetcher.cc
   src/adapters/logan_renderer.cc
@@ -98,6 +99,11 @@ target_compile_options(wc_net_test PRIVATE -Wall -Wextra)
 add_executable(wc_graph_test tests/unit/graph_test.cc)
 target_link_libraries(wc_graph_test PRIVATE wc_core)
 target_compile_options(wc_graph_test PRIVATE -Wall -Wextra)
+
+# Crawl regression (BFS empty-queue front()). Not in `make unit` until crawl.cc is fixed: make crawl-regress
+add_executable(wc_crawl_test tests/unit/crawl_test.cc)
+target_link_libraries(wc_crawl_test PRIVATE wc_core)
+target_compile_options(wc_crawl_test PRIVATE -Wall -Wextra)
 
 add_executable(wc_ui_test tests/unit/ui_test.cc)        # layout + replay
 target_link_libraries(wc_ui_test PRIVATE wc_ui_logic)

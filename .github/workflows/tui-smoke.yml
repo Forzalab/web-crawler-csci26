@@ -1,0 +1,42 @@
+# TUI smoke (tests/smoke/): drives the real TUI in tmux panes against OFFLINE
+# fixture graphs (WC_FIXTURE, no network). BLOCKING: any CRASH / HANG / ERR fails.
+# Live cases (real sites) never run in CI: run them locally with `make smoke-live`.
+name: tui-smoke
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps (tmux, libssl-dev)
+        run: |
+          command -v tmux > /dev/null && dpkg -s libssl-dev > /dev/null 2>&1 \
+            || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends tmux libssl-dev; }
+          tmux -V
+
+      - name: Build
+        run: make
+
+      # Writes the PASS/CRASH/HANG table to $GITHUB_STEP_SUMMARY itself.
+      - name: Offline TUI smoke
+        run: make smoke-offline
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-smoke
+          path: |
+            build/smoke/
+            !build/smoke/latest
+            !build/smoke/fixtures/
+          if-no-files-found: ignore

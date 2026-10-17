@@ -24,6 +24,7 @@
 #include "net/cache.h"
 #include "net/https_fetcher.h"
 #include "ui/camera.h"
+#include "ui/fixture_source.h"
 #include "ui/front_ends.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
@@ -145,8 +146,12 @@ int tui_main(int argc, char** argv) {
     tls.use_cache(&cache, false, false);
     tls.use_robots(true);
     RoutedFetcher routed(josh, tls);
-    ProgressTap tap(routed);  // the loading screen reads tap.snapshot(); g stays the worker's until done
     RealSleeper sleeper;
+    NoSleeper no_sleep;
+    auto fixture = fixture_source_from_env();  // WC_FIXTURE=file: fake web, no network (tests/smoke)
+    LinkSource& source = fixture ? *fixture : static_cast<LinkSource&>(routed);
+    Sleeper& pause = fixture ? static_cast<Sleeper&>(no_sleep) : sleeper;
+    ProgressTap tap(source);  // the loading screen reads tap.snapshot(); g stays the worker's until done
     std::string start;
     CrawlGraph g;
     std::thread worker, ticker;
@@ -202,7 +207,7 @@ int tui_main(int argc, char** argv) {
         step = Step::Crawling;
         crawl_t0 = Clock::now();
         worker = std::thread([&] {
-            CrawlGraph r = crawl(start, cfg, tap, sleeper);
+            CrawlGraph r = crawl(start, cfg, tap, pause);
             screen.Post([&, r = std::move(r)]() mutable {
                 g = std::move(r);
                 crawl_done = true;
