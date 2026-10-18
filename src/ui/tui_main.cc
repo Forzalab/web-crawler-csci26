@@ -5,6 +5,11 @@
 // Zoom keys that also work mid-typing (Termux extra-keys row): PgUp in, PgDn out (preview closed).
 // Every frame is one bracketed write (ui/term_lock.h): no row-by-row redraw.
 // Enter on a result opens its page preview (cache, else live fetch).
+// Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
+// and shows the graph so far; /resume crawls on into the same graph.
+// /bridges uploads the graph through gateway/ when WC_GATEWAY_URL is set (BRIDGES_ASSIGNMENT,
+// WC_BRIDGES_SUB = 0, WC_GATEWAY_TOKEN optional); once uploaded, a finished /resume re-uploads
+// to the same assignment + sub, so the same link shows the bigger graph.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -23,8 +28,10 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include "adapters/josh_fetcher.h"
+#include "bridges/bridges_json.h"
 #include "core/crawl.h"
 #include "net/cache.h"
+#include "net/gateway.h"
 #include "net/https_fetcher.h"
 #include "ui/anim.h"
 #include "ui/camera.h"
@@ -52,6 +59,8 @@ namespace {
 
 // Zoom keys, shown under the omnibar and in /help. + - 0 Home need an empty omnibar.
 constexpr const char* kZoomHint = "zoom + - 0 · PgUp PgDn";
+
+constexpr int kWorkers = 16;  // parallel fetches; pacing per host is the fetcher's (robots, Crawl-delay, 429)
 
 // Onboarding coach marks, first run only. Copy lives here so it is easy to rewrite.
 const std::vector<std::string> kCoach = {
@@ -81,8 +90,9 @@ std::string bridges_url() {
 }
 
 // Centered prompt column: question, the live input, a dim footer.
+// The blank top row balances the footer row, so the body is centred on the whole screen.
 Element step_screen(Element body, const std::string& footer) {
-    return vbox({filler(), hcenter(std::move(body)), filler(),
+    return vbox({text(""), filler(), hcenter(std::move(body)), filler(),
                  hcenter(text(footer) | color(th::kChrome) | dim)}) |
            flex;
 }
@@ -92,14 +102,12 @@ Element url_screen(const std::vector<std::string>& chips, Element input) {
     for (const auto& c : chips) {
         chip_row.push_back(text("[ " + short_label(c) + " ✕ ] ") | color(th::kAccent));
     }
-    return step_screen(vbox({hbox(std::move(chip_row)),
-                             views::input_box(hbox({text("› ") | bold | color(th::kAccent),
-                                                    std::move(input) | size(WIDTH, EQUAL, 50)}))}),
+    return step_screen(vbox({hbox(std::move(chip_row)), views::field("", std::move(input), 50)}),
                        "Enter crawl · Tab add URL · Esc quit");
 }
 
 Element prompt_screen(const std::string& q, Element input, const std::string& footer = "Enter accept default · Esc quit") {
-    return step_screen(hbox({text(q + "  ") | bold | color(th::kText), views::input_box(std::move(input) | size(WIDTH, EQUAL, 8))}), footer);
+    return step_screen(views::field(q, std::move(input), 8), footer);
 }
 
 Element summary_screen(const CrawlGraph& g) {
@@ -131,6 +139,7 @@ int tui_main(int argc, char** argv) {
     Step step = Step::Url;
     CrawlConfig cfg;
     cfg.maxSize = 50;
+    cfg.workers = kWorkers;
     bool visualize = first_run;
 
     // URL step. MVP: only chips[0] (or the typed URL) is crawled.
@@ -138,10 +147,12 @@ int tui_main(int argc, char** argv) {
     std::vector<std::string> chips;
     std::string url_text, prompt_text, omni_text;
     int prompt_cursor = 0, omni_cursor = 0;
-    InputOption url_opt, prompt_opt, omni_opt;
+    InputOption base;  // shared by every input: views::input_text look, one line
+    base.transform = [](InputState s) { return views::input_text(std::move(s.element), s.is_placeholder); };
+    base.multiline = false;
+    InputOption url_opt = base, prompt_opt = base, omni_opt = base;
     url_opt.placeholder = "Paste a URL. Enter to crawl.";
     omni_opt.placeholder = "";  // ghost carries the hint (main_screen)
-    url_opt.multiline = prompt_opt.multiline = omni_opt.multiline = false;
     prompt_opt.cursor_position = &prompt_cursor;
     omni_opt.cursor_position = &omni_cursor;
     auto url_in = Input(&url_text, url_opt);
@@ -166,7 +177,10 @@ int tui_main(int argc, char** argv) {
     std::string start;
     CrawlGraph g;
     std::thread worker, ticker;
-    std::atomic<bool> crawl_done{false}, quitting{false};
+    std::atomic<bool> crawl_done{false}, quitting{false}, stop_crawl{false};
+    cfg.cancel = &stop_crawl;  // Esc on the loading screen
+    bool resumed = false;      // last crawl was a /resume: no replay
+    bool stopped_once = false;  // a stop leaves fetches running on detached threads: _Exit at the end
     int tick = 0;
     matrix::MatrixRain rain;  // loading-screen backdrop, one frame per ticker tick
     Clock::time_point crawl_t0;
@@ -195,6 +209,13 @@ int tui_main(int argc, char** argv) {
     std::thread pv_worker;
     std::atomic<bool> pv_busy{false};
 
+    // BRIDGES upload: one thread at a time; shared = uploaded once this session.
+    const char* gateway = std::getenv("WC_GATEWAY_URL");
+    std::string share_url;  // the gateway's answer; "" = the env-built link (bridges_url)
+    bool shared = false;
+    std::thread up_worker;
+    std::atomic<bool> up_busy{false};
+
     auto toast = [&](const std::string& s) {
         toast_text = s;
         toast_at = Clock::now();
@@ -209,6 +230,31 @@ int tui_main(int argc, char** argv) {
         hits = q.verb.empty() && !idle ? match(g, q) : std::vector<int>{};  // empty query: ghost only
         selected = std::clamp(selected, 0, std::max(0, int(hits.size()) - 1));
     };
+    auto view_url = [&] { return share_url.empty() ? bridges_url() : share_url; };
+    // refresh = re-upload after a /resume: quiet until it lands.
+    auto upload = [&](bool refresh) {
+        if (up_busy) return toast("still uploading…");
+        if (up_worker.joinable()) up_worker.join();
+        up_busy = true;
+        if (!refresh) toast("uploading to BRIDGES…");
+        up_worker = std::thread([&, refresh, json = bridges_json(g)] {
+            HttpOptions opt;
+            opt.timeout_ms = 20000;  // the gateway waits up to 15 s for BRIDGES
+            HttpClient http(opt);
+            const char *a = std::getenv("BRIDGES_ASSIGNMENT"), *sub = std::getenv("WC_BRIDGES_SUB"),
+                       *tok = std::getenv("WC_GATEWAY_TOKEN");
+            GatewayReply r = gateway_upload(http, gateway, a ? a : "", sub ? std::atoi(sub) : 0, json, tok ? tok : "");
+            screen.Post([&, refresh, r] {
+                if (!r.error.empty()) return toast("BRIDGES: " + r.error);
+                share_url = r.url;
+                shared = true;
+                if (refresh) return toast("BRIDGES updated");
+                bridges_shown = true;
+            });
+            up_busy = false;
+            screen.PostEvent(Event::Custom);
+        });
+    };
 
     auto begin_prompt = [&](Step s, const std::string& def) {
         step = s;
@@ -216,11 +262,13 @@ int tui_main(int argc, char** argv) {
         prompt_cursor = int(def.size());
         tab = 1;
     };
-    auto start_crawl = [&] {
+    auto start_crawl = [&](bool resume) {
         step = Step::Crawling;
         crawl_t0 = Clock::now();
-        worker = std::thread([&] {
-            CrawlGraph r = crawl(start, cfg, tap, pause);
+        crawl_done = stop_crawl = false;
+        resumed = resume;
+        worker = std::thread([&, resume, base = resume ? g : CrawlGraph{}]() mutable {
+            CrawlGraph r = resume ? resume_crawl(std::move(base), cfg, tap) : crawl(start, cfg, tap, pause);
             screen.Post([&, r = std::move(r)]() mutable {
                 g = std::move(r);
                 crawl_done = true;
@@ -238,6 +286,11 @@ int tui_main(int argc, char** argv) {
         worker.join();
         ticker.join();
         std::ofstream(seen_path()) << "1\n";
+        int left = pending(g, cfg.maxDepth);
+        if (stop_crawl && left > 0) {
+            stopped_once = true;
+            toast("stopped · " + std::to_string(left) + " left · /resume");
+        }
         if (!visualize) {
             step = Step::Summary;
             return;
@@ -248,6 +301,7 @@ int tui_main(int argc, char** argv) {
         step = Step::Main;
         tab = 2;
         refresh_hits();
+        if (resumed && shared) upload(true);  // same assignment + sub: the old link shows the new graph
     };
 
     auto open_preview = [&](const Node& n) {
@@ -282,7 +336,7 @@ int tui_main(int argc, char** argv) {
 
     auto main_screen = [&]() -> Element {
         // Slow first fetches, then faster; ends when the old linear replay did.
-        int64_t el = no_anim ? INT64_MAX / 4 : replay_clock(ms_since(t0), replay_total);
+        int64_t el = no_anim || resumed ? INT64_MAX / 4 : replay_clock(ms_since(t0), replay_total);
         ReplayFrame f = replay_at(g, el);
         if (!flashed_depth && f.depth >= cfg.maxDepth) flashed_depth = true, flash_depth_at = Clock::now();
         if (!flashed_size && f.size >= cfg.maxSize) flashed_size = true, flash_size_at = Clock::now();
@@ -316,7 +370,7 @@ int tui_main(int argc, char** argv) {
 
         std::vector<std::string> rows;
         if (bridges_shown) {
-            rows.push_back(bridges_url() + "   [c] copy");
+            rows.push_back(view_url() + "   [c] copy");
         } else {
             for (int id : hits) {
                 const Node& n = g.nodes[id];
@@ -337,7 +391,7 @@ int tui_main(int argc, char** argv) {
         Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
                              views::graph(g, lay, f, v) | flex,
                              views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost)});
-        // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast.
+        // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast (top right, under the boss bar).
         if (pv_open) {
             pv_scroll = std::clamp(pv_scroll, 0, std::max(0, int(pv_lines.size()) - 1));
             Element p = views::preview(pv_title, pv_lines, pv_scroll, glow, pv_max);
@@ -349,8 +403,8 @@ int tui_main(int argc, char** argv) {
             body = dbox({body, vbox({filler(), hbox({filler(), c, filler()}),
                                      emptyElement() | size(HEIGHT, EQUAL, 3 + extra + int(rows.size()))})});
         }
-        if (toast_live)
-            body = dbox({body, vbox({hbox({filler(), views::toast(toast_text)}), filler()})});
+        if (toast_live)  // under the boss bar (2 rows), right edge in line with its PAGES meter
+            body = dbox({body, vbox({emptyElement() | size(HEIGHT, EQUAL, 2), hbox({filler(), views::toast(toast_text), text(" ")}), filler()})});
         return body;
     };
 
@@ -402,10 +456,21 @@ int tui_main(int argc, char** argv) {
         Query q = parse_query(omni_text);
         if (q.verb == "quit") return screen.Exit();
         if (q.verb == "help") {
-            toast("wiki · depth:<3 · status:failed · /bridges /help /quit · " + std::string(kZoomHint));
+            toast("wiki · depth:<3 · status:failed · /bridges /resume /help /quit · " + std::string(kZoomHint));
             return set_omni("");
         }
-        if (q.verb == "bridges") return void(bridges_shown = true);
+        if (q.verb == "resume") {
+            set_omni("");
+            refresh_hits();
+            if (pending(g, cfg.maxDepth) == 0) return toast("nothing to resume");
+            close_preview();
+            return start_crawl(true);
+        }
+        if (q.verb == "bridges") {
+            if (gateway && *gateway) return upload(false);
+            toast("set WC_GATEWAY_URL to upload");
+            return void(bridges_shown = true);
+        }
         if (q.verb == "close") {
             close_preview();
             return set_omni(""), refresh_hits();
@@ -440,6 +505,7 @@ int tui_main(int argc, char** argv) {
             }
             if (step == Step::Main && coach_step >= 0) return coach_step = -1, true;
             if (step == Step::Main && pv_open) return close_preview(), true;
+            if (step == Step::Crawling) return stop_crawl = true, true;  // graph so far; Ctrl-C quits
             screen.Exit();
             return true;
         }
@@ -477,7 +543,7 @@ int tui_main(int argc, char** argv) {
             case Step::Pages:
                 if (e == Event::Return) {
                     cfg.maxSize = std::max(1, int_or(prompt_text, 50));
-                    start_crawl();
+                    start_crawl(false);
                     return true;
                 }
                 return false;
@@ -487,7 +553,7 @@ int tui_main(int argc, char** argv) {
         }
         // Main: omnibar keys.
         if (bridges_shown && e == Event::Character('c')) {
-            std::cout << osc52(bridges_url());
+            std::cout << osc52(view_url());
             std::cout.flush();
             toast("copy sent ✓");
             bridges_shown = false;
@@ -543,8 +609,11 @@ int tui_main(int argc, char** argv) {
     screen.Loop(app);
     quitting = true;
     if (ticker.joinable()) ticker.join();
-    if (pv_busy) std::_Exit(0);  // a preview fetch is mid-network and holds `tls`
+    std::cout.flush();  // every _Exit below skips TermLock's destructor
+    if (stopped_once) std::_Exit(0);  // detached crawl fetches may still hold the fetchers
+    if (pv_busy || up_busy) std::_Exit(0);  // a preview fetch / upload is mid-network
     if (pv_worker.joinable()) pv_worker.join();
+    if (up_worker.joinable()) up_worker.join();
     if (worker.joinable()) {
         if (!crawl_done) std::_Exit(0);  // Esc mid-crawl: the worker still holds our fetchers
         worker.join();

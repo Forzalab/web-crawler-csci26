@@ -24,6 +24,14 @@ ftxui::Element boss_bar(int depth, int max_depth, int size, int max_size,
 // The one look for every text input: white on black, rounded border (NO_COLOR: border + plain text).
 ftxui::Element input_box(ftxui::Element input);
 
+// Every Input's InputOption::transform: white text, dim placeholder, never inverted
+// (FTXUI's default inverts the focused input: black on white). The real terminal cursor marks the caret.
+ftxui::Element input_text(ftxui::Element input, bool placeholder);
+
+// One prompt field: "label ╭› input╮", label on the box's text row (not its border), orange "› ",
+// input `width` cols. Empty label = box only. Centre the result as one block.
+ftxui::Element field(const std::string& label, ftxui::Element input, int width);
+
 // Bottom bar: `input` is the live Input component's Element. Results drop up.
 ftxui::Element omnibar(ftxui::Element input, const std::vector<std::string>& results,
                        int selected, const std::string& ghost);

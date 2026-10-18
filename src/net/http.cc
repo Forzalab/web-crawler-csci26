@@ -149,7 +149,16 @@ HttpClient::HttpClient(HttpOptions opt) : opt_(std::move(opt)) {
 
 HttpClient::~HttpClient() = default;
 
-HttpResponse HttpClient::get(const Url& url) {
+HttpResponse HttpClient::get(const Url& url) { return request(url, "GET", "", ""); }
+
+HttpResponse HttpClient::post(const Url& url, const std::string& body, const std::string& content_type,
+                              const std::map<std::string, std::string>& headers) {
+    std::string extra = "\r\nContent-Type: " + content_type + "\r\nContent-Length: " + std::to_string(body.size());
+    for (const auto& [k, v] : headers) extra += "\r\n" + k + ": " + v;
+    return request(url, "POST", extra, body);
+}
+
+HttpResponse HttpClient::request(const Url& url, const char* method, const std::string& extra, const std::string& body) {
     HttpResponse r;
     bool https = url.scheme == "https";
 #ifndef WC_HAVE_OPENSSL
@@ -161,10 +170,10 @@ HttpResponse HttpClient::get(const Url& url) {
     int fd = connect_tcp(url, opt_.timeout_ms, r.error);
     if (fd < 0) return r;
 
-    std::string req = "GET " + url.target() + " HTTP/1.1\r\nHost: " + url.host_port() +
+    std::string req = std::string(method) + " " + url.target() + " HTTP/1.1\r\nHost: " + url.host_port() +
                       "\r\nUser-Agent: " + opt_.user_agent +
                       "\r\nAccept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"
-                      "\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
+                      "\r\nAccept-Encoding: identity\r\nConnection: close" + extra + "\r\n\r\n" + body;
 
     // One read/write pair for both transports. Returns bytes, 0 = EOF, -1 = error (sets r.error).
     std::function<long(char*, size_t)> rd;
@@ -172,7 +181,7 @@ HttpResponse HttpClient::get(const Url& url) {
 #ifdef WC_HAVE_OPENSSL
     SSL* ssl = nullptr;
     if (https) {
-        if (!tls_) {
+        std::call_once(tls_once_, [&] {  // get() runs on many crawl threads
             tls_ = std::make_unique<Tls>();
             tls_->ctx = SSL_CTX_new(TLS_client_method());
             SSL_CTX_set_min_proto_version(tls_->ctx, TLS1_2_VERSION);
@@ -181,7 +190,7 @@ HttpResponse HttpClient::get(const Url& url) {
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
             SSL_CTX_set_options(tls_->ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);  // servers that just close
 #endif
-        }
+        });
         ssl = SSL_new(tls_->ctx);
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, url.host.c_str());  // SNI
@@ -190,7 +199,11 @@ HttpResponse HttpClient::get(const Url& url) {
             long v = SSL_get_verify_result(ssl);
             if (v != X509_V_OK) r.error = std::string("tls: ") + X509_verify_cert_error_string(v);
             else if (timed_out()) r.error = "timeout: tls handshake";
-            else r.error = std::string("tls: ") + ERR_error_string(ERR_get_error(), nullptr);
+            else {
+                char err[256];  // own buffer: ERR_error_string(.., nullptr) shares a static one
+                ERR_error_string_n(ERR_get_error(), err, sizeof err);
+                r.error = std::string("tls: ") + err;
+            }
             ERR_clear_error();
             SSL_free(ssl);
             close(fd);

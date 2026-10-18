@@ -1,15 +1,24 @@
 // net_test.cc - unit tests for src/net (URL resolve, link extraction, HTTP
 // parsing, redirects, routing). No network: the fetcher gets a fake transport.
 // Run: build/wc_net_test   (exit 1 if any check fails)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <mutex>
+#include <thread>
 
 #include "mocks/mock_fetcher.h"
 #include "net/cache.h"
+#include "net/gateway.h"
 #include "net/html_links.h"
 #include "net/robots.h"
 #include "net/http.h"
@@ -424,6 +433,175 @@ static void test_polite_fetch() {
     CHECK_EQ(status_label(r), std::string("OFFLINE"));
 }
 
+// 16 threads on one fetcher (the TUI's parallel crawl): a paced host (Crawl-delay) gets
+// one request at a time and exactly one pace sleep per request; an unpaced host runs in
+// parallel; robots.txt is fetched once per origin.
+static void test_parallel_fetch() {
+    std::mutex mu;
+    std::map<std::string, int> asked, in_flight, max_in_flight;
+    HttpsFetcher f([&](const Url& u) {
+        std::string k = u.str(), h = u.host;
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            ++asked[k];
+            max_in_flight[h] = std::max(max_in_flight[h], ++in_flight[h]);
+        }
+        for (int i = 0; i < 40 && h == "u.com"; ++i) {  // wait (<= 200 ms) for a second request to overlap
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                if (max_in_flight[h] > 1) break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            --in_flight[h];
+        }
+        if (u.path == "/robots.txt")
+            return h == "p.com" ? resp(200, {{"content-type", "text/plain"}}, "User-agent: *\nCrawl-delay: 1\n") : resp(404, {});
+        return resp(200, {{"content-type", "text/html"}}, "<a href=/x>");
+    });
+    struct LockedSleeper : Sleeper {
+        std::mutex mu;
+        std::vector<int> ms;
+        void sleep_ms(int t) override {
+            std::lock_guard<std::mutex> lk(mu);
+            ms.push_back(t);
+        }
+    } sl;
+    f.use_sleeper(&sl);
+    std::atomic<int> ok{0};
+    std::vector<std::thread> ts;
+    for (int t = 0; t < 16; ++t)
+        ts.emplace_back([&, t] {
+            for (int i = 0; i < 5; ++i)
+                for (const char* host : {"p.com", "u.com"})
+                    ok += f.links("http://" + std::string(host) + "/" + std::to_string(t) + "-" + std::to_string(i)).has_value();
+        });
+    for (auto& t : ts) t.join();
+    CHECK_EQ(ok.load(), 160);
+    CHECK_EQ(asked["http://p.com/robots.txt"], 1);
+    CHECK_EQ(asked["http://u.com/robots.txt"], 1);
+    CHECK_EQ(max_in_flight["p.com"], 1);              // paced: one at a time
+    CHECK_EQ(max_in_flight["u.com"] > 1, true);       // unpaced: parallel
+    CHECK_EQ(sl.ms.size(), size_t(80));               // one pace sleep per p.com page, none for u.com
+    CHECK_EQ(std::count(sl.ms.begin(), sl.ms.end(), 1000), 80L);
+    CHECK_EQ(f.label_of("http://u.com/15-4"), std::string("OK"));
+}
+
+// Many threads storing / loading the cache at once: every load is whole, no .tmp left.
+static void test_cache_parallel() {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("wc_net_test_par_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    PageCache cache(dir.string());
+    std::atomic<int> bad{0};
+    std::vector<std::thread> ts;
+    for (int t = 0; t < 16; ++t)
+        ts.emplace_back([&, t] {
+            for (int i = 0; i < 30; ++i) {
+                FetchResult r;
+                r.url = "https://c.com/" + std::to_string(i % 3 == 0 ? 0 : t * 100 + i);  // page 0: shared by all
+                r.final_url = r.url;
+                r.status = 200;
+                r.content_type = "text/html";
+                r.body = std::string(1000 + i, 'x');
+                cache.store(r);
+                auto hit = cache.load(r.url);
+                if (!hit || hit->body.size() < 1000 || hit->body.find_first_not_of('x') != std::string::npos) ++bad;
+            }
+        });
+    for (auto& t : ts) t.join();
+    CHECK_EQ(bad.load(), 0);
+    int tmp = 0;
+    for (const auto& e : fs::directory_iterator(dir)) tmp += e.path().extension() == ".tmp";
+    CHECK_EQ(tmp, 0);
+    fs::remove_all(dir);
+}
+
+// Fake gateway on 127.0.0.1: answers each connection with the next canned reply, keeps the raw requests.
+struct FakeGateway {
+    int fd = -1, port = 0;
+    std::vector<std::string> replies, requests;
+    std::thread th;
+    explicit FakeGateway(std::vector<std::string> r) : replies(std::move(r)) {
+        fd = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bind(fd, reinterpret_cast<sockaddr*>(&a), sizeof a);
+        socklen_t n = sizeof a;
+        getsockname(fd, reinterpret_cast<sockaddr*>(&a), &n);
+        port = ntohs(a.sin_port);
+        listen(fd, 4);
+        th = std::thread([this] {
+            for (const auto& reply : replies) {
+                int c = accept(fd, nullptr, nullptr);
+                if (c < 0) return;
+                std::string req;
+                char buf[4096];
+                while (true) {  // headers, then Content-Length bytes of body
+                    size_t he = req.find("\r\n\r\n"), cl = req.find("Content-Length: ");
+                    if (he != std::string::npos && cl != std::string::npos &&
+                        req.size() >= he + 4 + std::stoul(req.substr(cl + 16)))
+                        break;
+                    long got = recv(c, buf, sizeof buf, 0);
+                    if (got <= 0) break;
+                    req.append(buf, size_t(got));
+                }
+                requests.push_back(req);
+                send(c, reply.data(), reply.size(), MSG_NOSIGNAL);
+                close(c);
+            }
+        });
+    }
+    const std::vector<std::string>& wait() {  // every reply sent: the requests are complete
+        if (th.joinable()) th.join();
+        return requests;
+    }
+    ~FakeGateway() {
+        wait();
+        close(fd);
+    }
+    std::string url() const { return "http://127.0.0.1:" + std::to_string(port) + "/api/bridges"; }
+};
+
+static std::string http_reply(int status, const std::string& json) {
+    return "HTTP/1.1 " + std::to_string(status) + " X\r\nContent-Type: application/json\r\nContent-Length: " +
+           std::to_string(json.size()) + "\r\nConnection: close\r\n\r\n" + json;
+}
+
+static void test_gateway() {
+    CHECK_EQ(json_string(R"({"ok":true,"url":"http:\/\/a.org\/x \"q\"","sub":0})", "url"), std::string("http://a.org/x \"q\""));
+    CHECK_EQ(json_string(R"({"ok":false, "error" : "assignment must be 1..99"})", "error"), std::string("assignment must be 1..99"));
+    CHECK_EQ(json_string(R"({"ok":true})", "url"), std::string(""));
+    std::string graph = R"({"visual":"GraphAdjacencyList","nodes":[],"links":[]})";
+    HttpClient http;
+    {
+        FakeGateway gw({http_reply(200, R"({"ok":true,"url":"http://assignments.bridgesuncc.org/assignments/26/tony","assignment":26,"sub":3})"),
+                        http_reply(400, R"({"ok":false,"error":"assignment must be 1..99"})"),
+                        http_reply(502, "not json")});
+        GatewayReply r = gateway_upload(http, gw.url(), "26", 3, graph, "tok");
+        CHECK_EQ(r.error, std::string(""));
+        CHECK_EQ(r.url, std::string("http://assignments.bridgesuncc.org/assignments/26/tony"));
+        r = gateway_upload(http, gw.url(), "", 0, graph);
+        CHECK_EQ(r.error, std::string("assignment must be 1..99"));
+        CHECK_EQ(r.url, std::string(""));
+        r = gateway_upload(http, gw.url(), "26", 0, graph);
+        CHECK_EQ(r.error, std::string("gateway: HTTP 502"));
+        const std::string& q = gw.wait().at(0);
+        CHECK_EQ(q.rfind("POST /api/bridges?assignment=26&sub=3 HTTP/1.1\r\n", 0), size_t(0));
+        CHECK_EQ(q.find("\r\nContent-Type: application/json\r\n") != std::string::npos, true);
+        CHECK_EQ(q.find("\r\nContent-Length: " + std::to_string(graph.size()) + "\r\n") != std::string::npos, true);
+        CHECK_EQ(q.find("\r\nX-Gateway-Token: tok\r\n") != std::string::npos, true);
+        CHECK_EQ(q.substr(q.find("\r\n\r\n") + 4), graph);
+        CHECK_EQ(gw.requests.at(1).find("X-Gateway-Token"), std::string::npos);
+    }
+    GatewayReply down = gateway_upload(http, "http://127.0.0.1:1/api", "26", 0, graph);  // nothing listens on port 1
+    CHECK_EQ(down.error.rfind("connect:", 0), size_t(0));
+}
+
 int main() {
     test_parse();
     test_resolve();
@@ -434,6 +612,9 @@ int main() {
     test_cache();
     test_robots_parse();
     test_polite_fetch();
+    test_parallel_fetch();
+    test_cache_parallel();
+    test_gateway();
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }

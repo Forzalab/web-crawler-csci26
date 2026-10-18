@@ -60,6 +60,7 @@ std::string parse_pipe_input(std::istream& in, PipeInput& out) {
 }
 
 std::optional<std::vector<std::string>> MockFetcher::links(const std::string& url) {
+    std::lock_guard<std::mutex> lk(mu_);
     call_log.push_back(url);
     auto it = web_.find(url);
     bool listed = it != web_.end();

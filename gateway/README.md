@@ -26,5 +26,7 @@ PORT=8080 BRIDGES_USER=... BRIDGES_KEY=... npm start     # local / Cloud Run
 ./build/wc --pipe --bridges < tests/crawl/inputfile9 | curl -s --data-binary @- 'localhost:8080/?assignment=26'
 ```
 
+The TUI posts here on `/bridges` (`WC_GATEWAY_URL=<this endpoint>`, `BRIDGES_ASSIGNMENT=N`, optional `WC_BRIDGES_SUB`, `WC_GATEWAY_TOKEN`).
+
 Files: `gateway.js` (all logic, host-independent) · `server.js` (node:http, Cloud Run/local) · `api/bridges.js` (Vercel).
 Not deployed. Deploy waits for Tony's host creds.

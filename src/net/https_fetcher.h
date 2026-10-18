@@ -4,10 +4,13 @@
 // Polite by default: robots.txt (RFC 9309, per origin, once per run; checked
 // again on every redirect hop), 429 /
 // 503 Retry-After retries, per-host pacing after a 429 or a Crawl-delay.
+// Thread safe (the TUI crawls with many threads): a paced host gets one request at a
+// time, unpaced hosts run fully parallel; robots.txt is fetched once per origin.
 #pragma once
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -63,7 +66,7 @@ public:
     // html = false: any 2xx content type is OK (robots.txt).
     FetchResult fetch(const std::string& url, bool html = true);
     std::optional<std::vector<std::string>> links(const std::string& url) override;
-    const FetchResult& last() const { return last_; }  // result of the latest links()
+    FetchResult last() const;                            // result of the latest links()
     std::string label_of(const std::string& url) const;  // status_label of links(url); "" = never asked
 
 private:
@@ -71,6 +74,7 @@ private:
     FetchResult fetch_live(const std::string& url);
     std::optional<FetchResult> robots_block(const std::string& url, const Url& u);
     void slow_host(const std::string& host, int ms);
+    std::mutex& gate(std::unordered_map<std::string, std::unique_ptr<std::mutex>>& gates, const std::string& key);
 
     std::shared_ptr<HttpClient> client_;
     Transport get_;
@@ -79,9 +83,13 @@ private:
     bool offline_ = false, refresh_ = false, robots_on_ = true;
     RealSleeper real_sleeper_;
     Sleeper* sleeper_ = &real_sleeper_;
+    // Lock order: robots gate -> host gate -> mu_. mu_ is never held over I/O or a sleep.
+    mutable std::mutex mu_;  // guards the maps below and last_
     std::unordered_map<std::string, RobotsRules> robots_;  // origin -> rules, this run
     std::unordered_map<std::string, int> host_delay_ms_;  // host -> sleep before each request
     std::unordered_map<std::string, std::string> labels_;  // asked url -> status_label
+    std::unordered_map<std::string, std::unique_ptr<std::mutex>> robots_gate_;  // origin: one robots.txt fetch
+    std::unordered_map<std::string, std::unique_ptr<std::mutex>> host_gate_;    // paced host: one request at a time
 };
 
 // https:// -> tls. http:// -> josh first; if Josh fails (or is not wired yet,

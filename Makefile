@@ -13,6 +13,7 @@ unit: all
 	$(BUILD)/wc_net_test
 	$(BUILD)/wc_graph_test
 	$(BUILD)/wc_crawl_test
+	$(BUILD)/wc_parallel_test
 	$(BUILD)/wc_ui_test
 	$(BUILD)/wc_query_test
 	NO_COLOR=1 $(BUILD)/wc_views_test
@@ -33,6 +34,7 @@ smoke: all
 smoke-offline: all
 	BIN=$(BUILD)/wc tests/smoke/run.sh --offline $(FILTER)
 	BIN=$(BUILD)/wc tests/smoke/tear_check.sh
+	BIN=$(BUILD)/wc tests/smoke/stop_resume.sh
 
 smoke-live: all
 	BIN=$(BUILD)/wc tests/smoke/run.sh --live $(FILTER)

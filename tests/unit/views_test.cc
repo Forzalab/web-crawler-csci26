@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <ftxui/component/component.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
@@ -250,6 +251,46 @@ static void test_omnibar_colors() {
     CHECK(s2.PixelAt(1, 1).foreground_color == Color::White, s2.ToString());
 }
 
+// The REAL Input (focused, as in the TUI) with the shared transform: white on black, never
+// inverted, placeholder or typed. FTXUI's default transform inverts it (black on white).
+static void test_input_colors() {
+    InputOption opt;
+    opt.transform = [](InputState st) { return views::input_text(std::move(st.element), st.is_placeholder); };
+    for (std::string content : {std::string(), std::string("12")}) {
+        opt.placeholder = "Paste a URL.";
+        Component in = Input(&content, opt);
+        Screen s = Screen::Create(Dimension::Fixed(40), Dimension::Fixed(3));
+        Render(s, views::field("Max depth [3]", in->Render(), 14));
+        std::string out = s.ToString();
+        int x0 = 0;  // box spans from the first border cell to the last
+        while (x0 < 40 && s.PixelAt(x0, 1).character != "│") ++x0;
+        CHECK(x0 < 40, out);
+        for (int y = 0; y < 3; ++y)
+            for (int x = x0; x < 40 && x < x0 + 18; ++x) {
+                const auto& p = s.PixelAt(x, y);
+                CHECK(!p.inverted && p.background_color == Color::Black, out);
+            }
+        int x = x0;
+        while (x < 40 && s.PixelAt(x, 1).character != (content.empty() ? "P" : "1")) ++x;
+        CHECK(x < 40 && s.PixelAt(x, 1).foreground_color == Color::White, out);
+    }
+}
+
+// Label on the box's text row (not on its border), "› " in every field, one block.
+static void test_field_align() {
+    std::string out = render(views::field("Max depth [3]", text("5"), 8), 30, 3);
+    CHECK(line_of(out, 0).find("Max") == std::string::npos, out);
+    CHECK(line_of(out, 1).find("Max depth [3] │› 5") != std::string::npos, out);
+    CHECK(line_of(out, 0).find("╭") == line_of(out, 1).find("│"), out);
+    out = render(views::field("", text("example.com"), 20), 30, 3);
+    CHECK(line_of(out, 1).rfind("│› example.com", 0) == 0, out);
+    // Omnibar: the ghost trails the real (xflex) Input, no gap in between.
+    std::string empty;
+    Component in = Input(&empty, InputOption{});
+    out = render(views::omnibar(in->Render(), {}, -1, "Type to find a page."), 80, 3);
+    CHECK_HAS(out, "│› Type to find a page.");
+}
+
 static void test_toast_too_small() {
     std::string out = render(views::toast("Copied 12 URLs"), 30, 3);
     CHECK_HAS(out, "✓ Copied 12 URLs");
@@ -355,7 +396,7 @@ static void test_loading() {
     CHECK_HAS(out, "✓ iana.org/");
     CHECK_HAS(out, "✓ iana.org/domains");
     CHECK_HAS(out, "✗ ext.com/very/long");
-    CHECK_HAS(out, "Esc quit");
+    CHECK_HAS(out, "Esc stop · Ctrl-C quit");
     CHECK_HAS(out, "╭");
     // Newest at the bottom, and the long line is clipped to the box (<= 64 inside the border).
     CHECK(out.find("✓ iana.org/domains") < out.find("✗ ext.com"), out);
@@ -365,7 +406,7 @@ static void test_loading() {
     out = render(views::loading(st, emptyElement()), 50, 20);
     CHECK_HAS(out, "untangling the web…");
     CHECK_HAS(out, "✗ ext.com");
-    CHECK_HAS(out, "Esc quit");
+    CHECK_HAS(out, "Esc stop · Ctrl-C quit");
     size_t tl = out.find("╭");
     CHECK(tl != std::string::npos && out.find("╮", tl) < out.find('\n', tl), out);  // right edge on screen
     st.cols = 80;
@@ -383,7 +424,7 @@ static void test_loading() {
         CHECK_HAS(out, "│   crawling iana.org ");
         CHECK_HAS(out, "│ pages 3  links 40  fail 1  depth 1 ");
         CHECK_HAS(out, "│ ✓ iana.org/domains ");
-        CHECK_HAS(out, "Esc quit");
+        CHECK_HAS(out, "Esc stop · Ctrl-C quit");
         size_t top = out.find("╭");
         CHECK(top != std::string::npos && out.substr(0, top).find_first_not_of(" \n") != std::string::npos, out);
         // Every box row (border to border) is byte-identical to the render with no background.
@@ -434,6 +475,8 @@ int main() {
     test_boss_bar();
     test_omnibar();
     test_omnibar_colors();
+    test_input_colors();
+    test_field_align();
     test_omnibar_placeholder();
     test_toast_too_small();
     test_preview();

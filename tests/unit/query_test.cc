@@ -86,6 +86,7 @@ static void test_complete() {
     CHECK_EQ(complete("/br"), std::string("/bridges"));
     CHECK_EQ(complete("/h"), std::string("/help"));
     CHECK_EQ(complete("/q"), std::string("/quit"));
+    CHECK_EQ(complete("/re"), std::string("/resume"));
     CHECK_EQ(complete("/bridges"), std::string(""));
     CHECK_EQ(complete("/x"), std::string(""));
     CHECK_EQ(complete("stat"), std::string("status:"));

@@ -17,7 +17,7 @@ const char* const kLines[] = {
     "following links so you don't have to…",
     "counting hops from home…",
     "politely knocking on servers…",
-    "sleeping 100 ms between requests…",
+    "16 fetchers, one polite crawler…",
     "dusting off old hyperlinks…",
     "reading HTML so you won't…",
     "sorting NEW from SEEN…",
@@ -30,7 +30,7 @@ const char* const kLines[] = {
     "peeking behind the <a href>…",
     "warming up the cache…",
     "respecting the crawl delay…",
-    "one page at a time, honest…",
+    "Esc stops, /resume picks it up…",
     "mapping the neighbourhood…",
 };
 
@@ -50,7 +50,10 @@ std::optional<std::vector<std::string>> ProgressTap::links(const std::string& ur
     all_.depth = std::max(all_.depth, d);
     if (r) {
         all_.links += int(r->size());
-        for (const auto& l : *r) depth_of_.emplace(l, d + 1);
+        for (const auto& l : *r) {  // parallel crawls land out of order: keep the smallest depth
+            auto [it, fresh] = depth_of_.emplace(l, d + 1);
+            if (!fresh) it->second = std::min(it->second, d + 1);
+        }
     }
     return r;
 }

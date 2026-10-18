@@ -26,11 +26,14 @@ add_library(wc_core STATIC
   src/core/graph.cc
   src/core/sleeper.cc
   src/core/crawl.cc          # Tony's #2
+  src/core/crawl_parallel.cc # TUI: parallel BFS + resume (same graph as crawl_bfs)
   src/mocks/mock_fetcher.cc
   src/mocks/mock_renderer.cc
   src/bridges/bridges_json.cc # BRIDGES JSON (no post)
 )
 target_include_directories(wc_core PUBLIC src)
+find_package(Threads REQUIRED)
+target_link_libraries(wc_core PUBLIC Threads::Threads)
 target_compile_options(wc_core PRIVATE -Wall -Wextra)
 
 # --- wc_net: our fetch path, http + https + redirects (src/net/) ------------
@@ -43,6 +46,7 @@ add_library(wc_net STATIC
   src/net/https_fetcher.cc
   src/net/cache.cc
   src/net/robots.cc
+  src/net/gateway.cc  # TUI /bridges: POST the graph to gateway/
 )
 target_include_directories(wc_net PUBLIC src)
 target_link_libraries(wc_net PUBLIC wc_core)  # Sleeper
@@ -109,13 +113,16 @@ target_compile_options(wc_graph_test PRIVATE -Wall -Wextra)
 add_executable(wc_crawl_test tests/unit/crawl_test.cc)
 target_link_libraries(wc_crawl_test PRIVATE wc_core)
 target_compile_options(wc_crawl_test PRIVATE -Wall -Wextra)
+add_executable(wc_parallel_test tests/unit/parallel_test.cc)  # parallel BFS == sequential, cancel, resume
+target_link_libraries(wc_parallel_test PRIVATE wc_core)
+target_compile_options(wc_parallel_test PRIVATE -Wall -Wextra)
 
 add_executable(wc_ui_test tests/unit/ui_test.cc)        # layout + replay
 target_link_libraries(wc_ui_test PRIVATE wc_ui_logic)
 add_executable(wc_query_test tests/unit/query_test.cc)  # omnibar + osc52
 target_link_libraries(wc_query_test PRIVATE wc_ui_logic)
 add_executable(wc_views_test tests/unit/views_test.cc)  # headless snapshots
-target_link_libraries(wc_views_test PRIVATE wc_ui_views)
+target_link_libraries(wc_views_test PRIVATE wc_ui_views ftxui::component)  # real Input in test_input_colors
 add_executable(wc_matrix_test tests/unit/matrix_test.cc)  # matrix rain
 target_link_libraries(wc_matrix_test PRIVATE wc_ui_views)
 foreach(t wc_ui_test wc_query_test wc_views_test wc_matrix_test)
