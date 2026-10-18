@@ -149,7 +149,16 @@ HttpClient::HttpClient(HttpOptions opt) : opt_(std::move(opt)) {
 
 HttpClient::~HttpClient() = default;
 
-HttpResponse HttpClient::get(const Url& url) {
+HttpResponse HttpClient::get(const Url& url) { return request(url, "GET", "", ""); }
+
+HttpResponse HttpClient::post(const Url& url, const std::string& body, const std::string& content_type,
+                              const std::map<std::string, std::string>& headers) {
+    std::string extra = "\r\nContent-Type: " + content_type + "\r\nContent-Length: " + std::to_string(body.size());
+    for (const auto& [k, v] : headers) extra += "\r\n" + k + ": " + v;
+    return request(url, "POST", extra, body);
+}
+
+HttpResponse HttpClient::request(const Url& url, const char* method, const std::string& extra, const std::string& body) {
     HttpResponse r;
     bool https = url.scheme == "https";
 #ifndef WC_HAVE_OPENSSL
@@ -161,10 +170,10 @@ HttpResponse HttpClient::get(const Url& url) {
     int fd = connect_tcp(url, opt_.timeout_ms, r.error);
     if (fd < 0) return r;
 
-    std::string req = "GET " + url.target() + " HTTP/1.1\r\nHost: " + url.host_port() +
+    std::string req = std::string(method) + " " + url.target() + " HTTP/1.1\r\nHost: " + url.host_port() +
                       "\r\nUser-Agent: " + opt_.user_agent +
                       "\r\nAccept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"
-                      "\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
+                      "\r\nAccept-Encoding: identity\r\nConnection: close" + extra + "\r\n\r\n" + body;
 
     // One read/write pair for both transports. Returns bytes, 0 = EOF, -1 = error (sets r.error).
     std::function<long(char*, size_t)> rd;

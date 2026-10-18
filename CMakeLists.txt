@@ -46,6 +46,7 @@ add_library(wc_net STATIC
   src/net/https_fetcher.cc
   src/net/cache.cc
   src/net/robots.cc
+  src/net/gateway.cc  # TUI /bridges: POST the graph to gateway/
 )
 target_include_directories(wc_net PUBLIC src)
 target_link_libraries(wc_net PUBLIC wc_core)  # Sleeper

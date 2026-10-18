@@ -1,4 +1,4 @@
-// http.h - one HTTP/1.1 GET over a plain socket (http) or OpenSSL (https).
+// http.h - one HTTP/1.1 GET or POST over a plain socket (http) or OpenSSL (https).
 // No redirects here: HttpsFetcher follows them. No proxy support.
 // TLS verifies the certificate + hostname against the system CA store
 // (OpenSSL honours SSL_CERT_FILE / SSL_CERT_DIR to point elsewhere).
@@ -38,8 +38,13 @@ public:
     HttpClient& operator=(const HttpClient&) = delete;
 
     HttpResponse get(const Url& url);
+    // Same request path as get(), with a body (the TUI uploads the graph to gateway/).
+    HttpResponse post(const Url& url, const std::string& body, const std::string& content_type,
+                      const std::map<std::string, std::string>& headers = {});
 
 private:
+    // extra = more header lines, each starting with "\r\n".
+    HttpResponse request(const Url& url, const char* method, const std::string& extra, const std::string& body);
     struct Tls;  // OpenSSL context, created once on the first https request (thread safe)
     HttpOptions opt_;
     std::once_flag tls_once_;

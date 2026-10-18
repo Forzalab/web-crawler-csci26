@@ -7,6 +7,9 @@
 // Enter on a result opens its page preview (cache, else live fetch).
 // Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
 // and shows the graph so far; /resume crawls on into the same graph.
+// /bridges uploads the graph through gateway/ when WC_GATEWAY_URL is set (BRIDGES_ASSIGNMENT,
+// WC_BRIDGES_SUB = 0, WC_GATEWAY_TOKEN optional); once uploaded, a finished /resume re-uploads
+// to the same assignment + sub, so the same link shows the bigger graph.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -25,8 +28,10 @@
 #include <ftxui/screen/terminal.hpp>
 
 #include "adapters/josh_fetcher.h"
+#include "bridges/bridges_json.h"
 #include "core/crawl.h"
 #include "net/cache.h"
+#include "net/gateway.h"
 #include "net/https_fetcher.h"
 #include "ui/anim.h"
 #include "ui/camera.h"
@@ -204,6 +209,13 @@ int tui_main(int argc, char** argv) {
     std::thread pv_worker;
     std::atomic<bool> pv_busy{false};
 
+    // BRIDGES upload: one thread at a time; shared = uploaded once this session.
+    const char* gateway = std::getenv("WC_GATEWAY_URL");
+    std::string share_url;  // the gateway's answer; "" = the env-built link (bridges_url)
+    bool shared = false;
+    std::thread up_worker;
+    std::atomic<bool> up_busy{false};
+
     auto toast = [&](const std::string& s) {
         toast_text = s;
         toast_at = Clock::now();
@@ -217,6 +229,31 @@ int tui_main(int argc, char** argv) {
         bool idle = q.verb.empty() && q.text.empty() && q.depth_op == 0 && !q.status;
         hits = q.verb.empty() && !idle ? match(g, q) : std::vector<int>{};  // empty query: ghost only
         selected = std::clamp(selected, 0, std::max(0, int(hits.size()) - 1));
+    };
+    auto view_url = [&] { return share_url.empty() ? bridges_url() : share_url; };
+    // refresh = re-upload after a /resume: quiet until it lands.
+    auto upload = [&](bool refresh) {
+        if (up_busy) return toast("still uploading…");
+        if (up_worker.joinable()) up_worker.join();
+        up_busy = true;
+        if (!refresh) toast("uploading to BRIDGES…");
+        up_worker = std::thread([&, refresh, json = bridges_json(g)] {
+            HttpOptions opt;
+            opt.timeout_ms = 20000;  // the gateway waits up to 15 s for BRIDGES
+            HttpClient http(opt);
+            const char *a = std::getenv("BRIDGES_ASSIGNMENT"), *sub = std::getenv("WC_BRIDGES_SUB"),
+                       *tok = std::getenv("WC_GATEWAY_TOKEN");
+            GatewayReply r = gateway_upload(http, gateway, a ? a : "", sub ? std::atoi(sub) : 0, json, tok ? tok : "");
+            screen.Post([&, refresh, r] {
+                if (!r.error.empty()) return toast("BRIDGES: " + r.error);
+                share_url = r.url;
+                shared = true;
+                if (refresh) return toast("BRIDGES updated");
+                bridges_shown = true;
+            });
+            up_busy = false;
+            screen.PostEvent(Event::Custom);
+        });
     };
 
     auto begin_prompt = [&](Step s, const std::string& def) {
@@ -264,6 +301,7 @@ int tui_main(int argc, char** argv) {
         step = Step::Main;
         tab = 2;
         refresh_hits();
+        if (resumed && shared) upload(true);  // same assignment + sub: the old link shows the new graph
     };
 
     auto open_preview = [&](const Node& n) {
@@ -332,7 +370,7 @@ int tui_main(int argc, char** argv) {
 
         std::vector<std::string> rows;
         if (bridges_shown) {
-            rows.push_back(bridges_url() + "   [c] copy");
+            rows.push_back(view_url() + "   [c] copy");
         } else {
             for (int id : hits) {
                 const Node& n = g.nodes[id];
@@ -428,7 +466,11 @@ int tui_main(int argc, char** argv) {
             close_preview();
             return start_crawl(true);
         }
-        if (q.verb == "bridges") return void(bridges_shown = true);
+        if (q.verb == "bridges") {
+            if (gateway && *gateway) return upload(false);
+            toast("set WC_GATEWAY_URL to upload");
+            return void(bridges_shown = true);
+        }
         if (q.verb == "close") {
             close_preview();
             return set_omni(""), refresh_hits();
@@ -511,7 +553,7 @@ int tui_main(int argc, char** argv) {
         }
         // Main: omnibar keys.
         if (bridges_shown && e == Event::Character('c')) {
-            std::cout << osc52(bridges_url());
+            std::cout << osc52(view_url());
             std::cout.flush();
             toast("copy sent ✓");
             bridges_shown = false;
@@ -569,8 +611,9 @@ int tui_main(int argc, char** argv) {
     if (ticker.joinable()) ticker.join();
     std::cout.flush();  // every _Exit below skips TermLock's destructor
     if (stopped_once) std::_Exit(0);  // detached crawl fetches may still hold the fetchers
-    if (pv_busy) std::_Exit(0);  // a preview fetch is mid-network and holds `tls`
+    if (pv_busy || up_busy) std::_Exit(0);  // a preview fetch / upload is mid-network
     if (pv_worker.joinable()) pv_worker.join();
+    if (up_worker.joinable()) up_worker.join();
     if (worker.joinable()) {
         if (!crawl_done) std::_Exit(0);  // Esc mid-crawl: the worker still holds our fetchers
         worker.join();

@@ -5,7 +5,7 @@ max depth 3, max size 1000, 0.1 s between requests) and draw it on BRIDGES.
 
 One binary, `wc`, two front ends:
 - **pipe mode** (stdin redirected): reads a fake web from stdin and prints a deterministic report. This is what the tests use. It never touches the network and never really sleeps.
-- **TUI** (stdin is a terminal): FTXUI screen. Placeholder for now (press `q` to quit); the layout comes later.
+- **TUI** (stdin is a terminal): FTXUI screen. Crawls with 16 parallel fetches (still polite per host: robots.txt, Crawl-delay, 429 pacing; pipe mode stays sequential with the 0.1 s delay). Esc on the loading screen stops and shows the graph so far; `/resume` crawls on into the same graph. `/bridges` uploads the graph through `gateway/` when `WC_GATEWAY_URL` is set (`BRIDGES_ASSIGNMENT`, `WC_BRIDGES_SUB` default 0, `WC_GATEWAY_TOKEN` if the gateway has `GATEWAY_TOKEN`); after that, a finished `/resume` re-uploads to the same assignment, so the same link shows the bigger graph.
 
 ## Build
 
