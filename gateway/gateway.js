@@ -6,7 +6,7 @@
 const DEFAULTS = {
   BRIDGES_SERVER: 'http://assignments.bridgesuncc.org', // bridges-cxx "live" (http only)
   ASSIGNMENT_MIN: '1',
-  ASSIGNMENT_MAX: '99',
+  ASSIGNMENT_MAX: '99999999',          // 8 digits: BRIDGES takes big ids (69696969)
   MAX_BYTES: String(4 * 1024 * 1024), // 1000 nodes + 20k edges ~ 1.7 MB (A11a §2)
   MAX_NODES: '1000',                   // spec max size
   TIMEOUT_MS: '15000',

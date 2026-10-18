@@ -34,11 +34,20 @@ test('sub defaults to 0 -> .00', async () => {
   assert.match(f.calls[0].url, /\/assignments\/26\.00\?/);
 });
 
+test('big assignment ids pass (8 digits, e.g. 69696969)', async () => {
+  const f = fakeFetch();
+  const out = await handle(req({ query: { assignment: '69696969' } }), ENV, f);
+  assert.equal(out.status, 200);
+  assert.equal(out.json.assignment, 69696969);
+  assert.match(f.calls[0].url, /\/assignments\/69696969\.00\?/);
+});
+
 const rejects = [
   ['GET', req({ method: 'GET' }), ENV, 405],
   ['no creds', req(), {}, 500],
   ['no assignment', req({ query: {} }), ENV, 400],
-  ['assignment out of range', req({ query: { assignment: '100' } }), ENV, 400],
+  ['assignment 0', req({ query: { assignment: '0' } }), ENV, 400],
+  ['assignment over 8 digits', req({ query: { assignment: '100000000' } }), ENV, 400],
   ['assignment not int', req({ query: { assignment: '2.5' } }), ENV, 400],
   ['assignment over custom max', req({ query: { assignment: '27' } }), { ...ENV, ASSIGNMENT_MIN: '26', ASSIGNMENT_MAX: '26' }, 400],
   ['sub 99', req({ query: { assignment: '26', sub: '99' } }), ENV, 400],
