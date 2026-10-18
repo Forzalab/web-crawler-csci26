@@ -257,12 +257,21 @@ int tui_main(int argc, char** argv) {
         return !share_url.empty() ? share_url : bridges_url(gateway && *gateway ? session_id() : "");
     };
     // refresh = re-upload after a /resume: quiet until it lands.
+    // Big crawls go up as the most prominent 1000 links (bridges_subset), with a note saying so.
     auto upload = [&](bool refresh) {
         if (up_busy) return toast("still uploading…");
         if (up_worker.joinable()) up_worker.join();
         up_busy = true;
-        if (!refresh) toast("uploading to BRIDGES…");
-        up_worker = std::thread([&, refresh, a = session_id(), json = bridges_json(g)] {
+        CrawlGraph sub = bridges_subset(g);
+        const bool cut = sub.nodes.size() < g.nodes.size();
+        const std::string note = cut ? std::to_string(sub.nodes.size()) + " of " + std::to_string(g.nodes.size()) + " links" : "";
+        BridgesMeta meta;
+        meta.pretty = true;
+        meta.title = (g.nodes.empty() ? std::string("web") : short_label(g.nodes[0].url)) + " crawl" + (cut ? " · " + note : "");
+        if (cut) meta.description = note + " shown — most prominent (root, first hop, most linked-to).";
+        for (size_t i = 0; i < g.nodes.size() && i < scene->lay.shape.size(); ++i) meta.site_rank[g.nodes[i].url] = scene->lay.shape[i];
+        if (!refresh) toast(cut ? "uploading " + note + " to BRIDGES…" : "uploading to BRIDGES…");
+        up_worker = std::thread([&, refresh, note, a = session_id(), json = bridges_json(sub, meta)] {
             HttpOptions opt;
             opt.timeout_ms = 20000;  // the gateway waits up to 15 s for BRIDGES
             HttpClient http(opt);
@@ -272,7 +281,8 @@ int tui_main(int argc, char** argv) {
                 if (!r.error.empty()) return toast("BRIDGES: " + r.error);
                 share_url = r.url;
                 shared = true;
-                if (refresh) return toast("BRIDGES updated");
+                if (refresh) return toast(note.empty() ? "BRIDGES updated" : "BRIDGES updated · " + note);
+                if (!note.empty()) toast("BRIDGES: " + note);
                 bridges_shown = true;
             });
             up_busy = false;

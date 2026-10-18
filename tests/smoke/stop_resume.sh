@@ -7,6 +7,8 @@
 #     share: BRIDGES_ASSIGNMENT unset: stop -> /bridges (1 upload, n nodes, random 7-digit
 #            assignment shown in the link) -> /resume -> "BRIDGES updated" (2nd upload, same
 #            assignment + sub, 1000 nodes)
+#     big:   Max links 2000 on tree1111 (1111 links) -> /bridges: 1 POST with the 1000-node subset,
+#            a toast saying "1000 of 1111 links"
 #     ctrlc: Ctrl-C on the loading screen -> exits, alt screen off (terminal restored)
 # Exit 1 on any FAIL. Env: BIN=build/wc  OUT=build/smoke/stop_resume  DELAY_MS=400
 set -u
@@ -58,7 +60,7 @@ waitfor() {  # waitfor <sess> <regex> <seconds>
     return 1
 }
 links() { cap "$1" | head -n 1 | grep -oE 'LINKS [0-9]+/[0-9]+'; }
-start() {  # start <sess> [assignment]: through the prompts, crawl begins (depth 3, 1000 links)
+start() {  # start <sess> [assignment] [max links]: through the prompts, crawl begins (depth 3, 1000 links)
     mkdir -p "$OUT/$1/home"
     T new-session -d -s "$1" -x 120 -y 40 -c "$root" \
         env -u BRIDGES_ASSIGNMENT HOME="$OUT/$1/home" WC_FIXTURE="$root/build/smoke/fixtures/tree1111.txt" WC_FIXTURE_DELAY_MS="$DELAY_MS" \
@@ -68,7 +70,7 @@ start() {  # start <sess> [assignment]: through the prompts, crawl begins (depth
     T send-keys -t "$1" -l -- "https://tree.example/"; T send-keys -t "$1" Enter; waitfor "$1" 'Visualize' 5
     T send-keys -t "$1" -l y; waitfor "$1" 'Max depth' 5
     T send-keys -t "$1" -l 3; T send-keys -t "$1" Enter; waitfor "$1" 'Max links' 5
-    T send-keys -t "$1" -l 1000; T send-keys -t "$1" Enter
+    T send-keys -t "$1" -l "${3:-1000}"; T send-keys -t "$1" Enter
     waitfor "$1" 'crawling' 5
 }
 fails=0
@@ -132,6 +134,20 @@ stop_resume() {  # stop_resume <sess> <share: 0|1>
 }
 stop_resume stop 0
 stop_resume share 1
+
+# Over 1000 links: /bridges uploads the most prominent 1000 and says so
+s=big bad=""
+start $s 26 2000 || bad="loading screen never shown"
+[ -z "$bad" ] && { waitfor $s 'LINKS 1111/2000' 30 || bad="LINKS 1111/2000 never shown ($(links $s))"; }
+if [ -z "$bad" ]; then
+    T send-keys -t $s -l "/bridges"; T send-keys -t $s Enter
+    waitfor $s '1000 of 1111 links' 5 || bad="no '1000 of 1111 links' toast"
+    for _ in $(seq 1 50); do [ "$(posts $s)" != 0 ] && break; sleep 0.1; done
+    [ -z "$bad" ] && { [ "$(posts $s)" = 1 ] && grep -q "assignment=26&sub=3 1000\$" "$OUT/$s.posts" ||
+        bad="upload: $(tr '\n' ';' < "$OUT/$s.posts" 2> /dev/null) (want 1 POST, 1000 nodes)"; }
+fi
+for _ in 1 2 3 4 5; do dead $s && break; T send-keys -t $s Escape; sleep 0.4; done
+verdict $s "$bad"
 
 # Ctrl-C mid-crawl: quits, terminal restored
 s=ctrlc bad=""
