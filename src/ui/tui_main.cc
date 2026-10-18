@@ -1,8 +1,10 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
 // URL -> Visualize? -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
 // Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps.
-// Graph keys (empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
-// Zoom keys that also work mid-typing (Termux extra-keys row): PgUp in, PgDn out (preview closed).
+// Focus (ui/focus.h): Tab cycles search bar -> preview (if open) -> graph; Esc steps back.
+// Graph keys (graph focused, or an empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
+// Preview keys (preview focused): j/k or arrows scroll, PgUp/PgDn 10 lines, m max.
+// Zoom keys that also work mid-typing (Termux extra-keys row): PgUp in, PgDn out.
 // Every frame is one bracketed write (ui/term_lock.h): no row-by-row redraw.
 // Enter on a result opens its page preview (cache, else live fetch).
 // Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
@@ -38,6 +40,7 @@
 #include "ui/anim.h"
 #include "ui/camera.h"
 #include "ui/fixture_source.h"
+#include "ui/focus.h"
 #include "ui/front_ends.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
@@ -62,6 +65,7 @@ namespace {
 
 // Zoom keys, shown under the omnibar and in /help. + - 0 Home need an empty omnibar.
 constexpr const char* kZoomHint = "zoom + - 0 · PgUp PgDn";
+constexpr const char* kGraphHint = "arrows pan · + - zoom · 0 fit · Tab next";  // graph focused
 
 constexpr int kWorkers = 16;  // parallel fetches; pacing per host is the fetcher's (robots, Crawl-delay, 429)
 
@@ -210,9 +214,12 @@ int tui_main(int argc, char** argv) {
     int pv_scroll = 0, pv_gen = 0;
     std::string pv_title;
     std::vector<std::string> pv_lines;
-    Clock::time_point pv_at;
     std::thread pv_worker;
     std::atomic<bool> pv_busy{false};
+
+    // Focus: who takes the keys on the main screen; focus_at drives the glow + flash.
+    Focus focus = Focus::Omni;
+    Clock::time_point focus_at;
 
     // BRIDGES upload: one thread at a time; shared = uploaded once this session.
     const char* gateway = std::getenv("WC_GATEWAY_URL");
@@ -222,6 +229,11 @@ int tui_main(int argc, char** argv) {
     std::thread up_worker;
     std::atomic<bool> up_busy{false};
 
+    auto set_focus = [&](Focus f) {
+        focus = f;
+        focus_at = Clock::now();
+        tab = f == Focus::Omni ? 2 : 1;  // the omnibar shows its caret only while focused
+    };
     auto toast = [&](const std::string& s) {
         toast_text = s;
         toast_at = Clock::now();
@@ -310,7 +322,7 @@ int tui_main(int argc, char** argv) {
         scene = std::make_shared<const Scene>(make_scene(g));
         t0 = last_frame = last_input = Clock::now();
         step = Step::Main;
-        tab = 2;
+        set_focus(Focus::Omni);
         refresh_hits();
         if (resumed && shared) upload(true);  // same assignment + sub: the old link shows the new graph
     };
@@ -318,7 +330,7 @@ int tui_main(int argc, char** argv) {
     auto open_preview = [&](const Node& n) {
         pv_open = true;
         pv_scroll = 0;
-        pv_at = Clock::now();
+        set_focus(Focus::Preview);
         pv_title = short_label(n.url) + url_path(n.url);
         int gen = ++pv_gen;
         if (auto hit = cache.load(n.url); hit && !hit->body.empty()) {
@@ -343,6 +355,7 @@ int tui_main(int argc, char** argv) {
     auto close_preview = [&] {
         pv_open = pv_max = false;
         ++pv_gen;
+        set_focus(Focus::Omni);
     };
 
     auto main_screen = [&]() -> Element {
@@ -375,8 +388,13 @@ int tui_main(int argc, char** argv) {
         last_frame = Clock::now();
         bool cam_moving = !settled(cam, cam_target);
         cam = cam_moving && !no_anim ? ease(cam, cam_target, std::min(dt, 0.1)) : cam_target;
-        float glow = no_anim ? 1.0f : float(0.5 + 0.5 * std::sin(ms_since(pv_at) / 1000.0 * 2 * M_PI / 1.2));
-        if (!f.done || flash_live || toast_live || fit_wait || cam_moving || (pv_open && !no_anim))
+        // Focus look: the preview or graph glows while it has the keys (the search bar, the
+        // resting state, stays bright and still); every change flashes toward white for 300 ms.
+        const int64_t since_focus = ms_since(focus_at);
+        float glow = no_anim || focus == Focus::Omni ? 1.0f : float(0.5 + 0.5 * std::cos(since_focus / 1000.0 * 2 * M_PI / 1.2));
+        float flash = no_anim ? 0.0f : float(1.0 - anim::ramp(since_focus, 300));
+        auto border = [&](Focus who) { return views::focus_border(focus == who, glow, flash); };
+        if (!f.done || flash_live || toast_live || fit_wait || cam_moving || flash > 0 || (focus != Focus::Omni && !no_anim))
             animation::RequestAnimationFrame();
 
         std::vector<std::string> rows;
@@ -393,20 +411,21 @@ int tui_main(int argc, char** argv) {
         ghost = ghost.size() > omni_text.size() ? ghost.substr(omni_text.size()) : "";
         if (omni_text.empty()) ghost = "Type to find a page.\nExample: " + example_label(g);
 
-        if (omni_text.empty()) ghost += "\n" + std::string(kZoomHint);
+        if (focus == Focus::Graph) ghost += "\n" + std::string(kGraphHint);
+        else if (omni_text.empty()) ghost += "\n" + std::string(kZoomHint);
         int extra = int(std::count(ghost.begin(), ghost.end(), '\n'));  // placeholder lines: rows in the box
         // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar (2) + omnibar (3 + results).
         auto ts = Terminal::Size();
         int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()) - extra);
         View v = apply(cam, fit(scene->lay, ts.dimx * 2, rows_left * 4), ts.dimx * 2, rows_left * 4);
 
-        Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
+        Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs, border(Focus::Graph)),
                              views::graph(scene, f, v, cam.zoom) | flex,
-                             views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost)});
+                             views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost, border(Focus::Omni))});
         // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast (top right, under the boss bar).
         if (pv_open) {
             pv_scroll = std::clamp(pv_scroll, 0, std::max(0, int(pv_lines.size()) - 1));
-            Element p = views::preview(pv_title, pv_lines, pv_scroll, glow, pv_max);
+            Element p = views::preview(pv_title, pv_lines, pv_scroll, border(Focus::Preview), pv_max);
             p = pv_max ? p | flex : p | size(HEIGHT, LESS_THAN, ts.dimy * 7 / 10);
             body = dbox({body, pv_max ? p : hbox({filler(), vbox({filler(), p, filler()}), text(" ")})  /* 1-col gap: borders join */});
         }
@@ -469,7 +488,7 @@ int tui_main(int argc, char** argv) {
         Query q = parse_query(omni_text);
         if (q.verb == "quit") return screen.Exit();
         if (q.verb == "help") {
-            toast("wiki · depth:<3 · status:failed · /bridges /resume /help /quit · " + std::string(kZoomHint));
+            toast("wiki · depth:<3 · status:failed · /bridges /resume /help /quit · " + std::string(kZoomHint) + " · Tab focus");
             return set_omni("");
         }
         if (q.verb == "resume") {
@@ -509,7 +528,10 @@ int tui_main(int argc, char** argv) {
         }
         if (step == Step::Main) last_input = Clock::now();
         if (e == Event::Escape) {
-            // Main: Esc peels one layer: omnibar text, then coach, then preview, then quit.
+            // Main: Esc peels one layer: the focused preview, graph focus, omnibar text, then
+            // coach, then preview, then quit.
+            if (step == Step::Main && focus == Focus::Preview && pv_open) return close_preview(), true;
+            if (step == Step::Main && focus == Focus::Graph) return set_focus(Focus::Omni), true;
             if (step == Step::Main && (bridges_shown || !omni_text.empty())) {
                 bridges_shown = false;
                 set_omni("");
@@ -579,36 +601,45 @@ int tui_main(int argc, char** argv) {
             if (++coach_step >= int(kCoach.size())) coach_step = -1;
             return true;
         }
-        // Camera + preview keys, only while the omnibar is empty (else they are typing).
-        bool empty = omni_text.empty() && !bridges_shown;
         auto zoom = [&](double k) { cam_target.zoom = std::clamp(cam_target.zoom * k, 0.25, 16.0); };
-        double pan = 0.25 / cam_target.zoom;  // world units (ring = 1), same feel at any zoom
-        if (e.is_mouse() && e.mouse().button == Mouse::WheelUp) return zoom(1.25), true;
-        if (e.is_mouse() && e.mouse().button == Mouse::WheelDown) return zoom(1 / 1.25), true;
-        if (pv_open && e == Event::PageDown) return pv_scroll += 10, true;
-        if (pv_open && e == Event::PageUp) return pv_scroll = std::max(0, pv_scroll - 10), true;
-        if (e == Event::PageUp) return zoom(1.25), true;  // kZoomHint: work while typing too
-        if (e == Event::PageDown) return zoom(1 / 1.25), true;
-        if (empty) {
-            if (e == Event::Character('+') || e == Event::Character('=')) return zoom(1.25), true;
-            if (e == Event::Character('-') || e == Event::Character('_')) return zoom(1 / 1.25), true;
-            if (e == Event::Character('0') || e == Event::Home) return cam_target = Camera{}, true;
-            if (e == Event::ArrowLeft) return cam_target.px += pan, true;
-            if (e == Event::ArrowRight) return cam_target.px -= pan, true;
-            if (e == Event::ArrowUp) return cam_target.py += pan, true;
-            if (e == Event::ArrowDown) return cam_target.py -= pan, true;
-            if (pv_open && e == Event::Character('j')) return ++pv_scroll, true;
-            if (pv_open && e == Event::Character('k')) return pv_scroll = std::max(0, pv_scroll - 1), true;
-            if (pv_open && e == Event::Character('m')) return pv_max = !pv_max, true;
-        }
-        if (e == Event::ArrowUp) return selected = std::min(selected + 1, std::max(0, int(hits.size()) - 1)), true;  // results drop up
-        if (e == Event::ArrowDown) return selected = std::max(selected - 1, 0), true;
+        auto camera_key = [&](const Event& k) {
+            double pan = 0.25 / cam_target.zoom;  // world units (ring = 1), same feel at any zoom
+            if (k == Event::Character('+') || k == Event::Character('=')) return zoom(1.25), true;
+            if (k == Event::Character('-') || k == Event::Character('_')) return zoom(1 / 1.25), true;
+            if (k == Event::Character('0') || k == Event::Home) return cam_target = Camera{}, true;
+            if (k == Event::ArrowLeft) return cam_target.px += pan, true;
+            if (k == Event::ArrowRight) return cam_target.px -= pan, true;
+            if (k == Event::ArrowUp) return cam_target.py += pan, true;
+            if (k == Event::ArrowDown) return cam_target.py -= pan, true;
+            return false;
+        };
+        // Tab: complete in the search bar if there is something to complete, else next focus.
         if (e == Event::Tab) {
             std::string c = complete(omni_text);
-            if (!c.empty()) set_omni(c);
-            refresh_hits();
-            return true;
+            if (focus == Focus::Omni && !c.empty() && c != omni_text) return set_omni(c), refresh_hits(), true;
+            return set_focus(next_focus(focus, pv_open)), true;
         }
+        if (e.is_mouse() && e.mouse().button == Mouse::WheelUp) return zoom(1.25), true;
+        if (e.is_mouse() && e.mouse().button == Mouse::WheelDown) return zoom(1 / 1.25), true;
+        bool empty = omni_text.empty() && !bridges_shown, key = !e.is_mouse();  // the mouse never moves focus
+        if (key && focus == Focus::Preview && pv_open) {  // the preview scrolls; any other key types into the bar
+            if (e == Event::Character('j') || e == Event::ArrowDown) return ++pv_scroll, true;
+            if (e == Event::Character('k') || e == Event::ArrowUp) return pv_scroll = std::max(0, pv_scroll - 1), true;
+            if (e == Event::PageDown) return pv_scroll += 10, true;
+            if (e == Event::PageUp) return pv_scroll = std::max(0, pv_scroll - 10), true;
+            if (e == Event::Character('m')) return pv_max = !pv_max, true;
+            if (e == Event::ArrowLeft || e == Event::ArrowRight) return true;
+            set_focus(Focus::Omni);
+        }
+        // Camera keys: graph focused (even with text in the bar), or an empty bar.
+        if (key && (focus == Focus::Graph || empty)) {
+            if (camera_key(e)) return true;
+            if (focus == Focus::Graph) set_focus(Focus::Omni);  // any other key: back to typing
+        }
+        if (e == Event::PageUp) return zoom(1.25), true;  // kZoomHint: work while typing too
+        if (e == Event::PageDown) return zoom(1 / 1.25), true;
+        if (e == Event::ArrowUp) return selected = std::min(selected + 1, std::max(0, int(hits.size()) - 1)), true;  // results drop up
+        if (e == Event::ArrowDown) return selected = std::max(selected - 1, 0), true;
         if (e == Event::Return) {
             on_omni_enter();
             return true;

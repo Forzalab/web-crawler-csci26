@@ -13,6 +13,7 @@
 #include "ui/progress.h"
 #include "ui/replay.h"
 #include "ui/scene.h"
+#include "ui/theme.h"
 
 namespace wc::views {
 
@@ -20,12 +21,18 @@ namespace wc::views {
 // camera's (1 = fit): far out (< 0.6) edges get sparser dots.
 ftxui::Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom = 1);
 
+// Border of a focusable part (omnibar, preview, the boss-bar rule for the graph).
+// Unfocused: faint grey. Focused: glows dim orange <-> orange with glow in [0,1],
+// pulled toward white by flash in [0,1] (1 = focus just arrived, fades over 300 ms).
+ftxui::Color focus_border(bool focused, float glow, float flash);
+
 // Top bar: two meters. flash = limit just hit (caller pulses it 1-2x).
+// rule = colour of the line under it (focus_border of the graph).
 ftxui::Element boss_bar(int depth, int max_depth, int size, int max_size,
-                        bool flash_depth, bool flash_size);
+                        bool flash_depth, bool flash_size, ftxui::Color rule = theme::kFaint);
 
 // The one look for every text input: white on black, rounded border (NO_COLOR: border + plain text).
-ftxui::Element input_box(ftxui::Element input);
+ftxui::Element input_box(ftxui::Element input, ftxui::Color border = theme::kAccent);
 
 // Every Input's InputOption::transform: white text, dim placeholder, never inverted
 // (FTXUI's default inverts the focused input: black on white). The real terminal cursor marks the caret.
@@ -37,15 +44,15 @@ ftxui::Element field(const std::string& label, ftxui::Element input, int width);
 
 // Bottom bar: `input` is the live Input component's Element. Results drop up.
 ftxui::Element omnibar(ftxui::Element input, const std::vector<std::string>& results,
-                       int selected, const std::string& ghost);
+                       int selected, const std::string& ghost, ftxui::Color border = theme::kAccent);
 
 ftxui::Element toast(const std::string& text);   // corner overlay, dbox it on top
 ftxui::Element too_small(int w, int h);          // < 80x24 guard
 
-// Floating page preview. glow in [0,1] = focus pulse phase (orange border
-// brightness); lines from html_to_lines; "# " lines render as headings.
+// Floating page preview. border = focus_border(...); lines from html_to_lines;
+// "# " lines render as headings.
 ftxui::Element preview(const std::string& title, const std::vector<std::string>& lines,
-                       int scroll, float glow, bool maximized);
+                       int scroll, ftxui::Color border, bool maximized);
 
 // Onboarding coach mark: "1/3  text" + dim "Tab next · Esc skip".
 ftxui::Element coach(int step, int total, const std::string& text);

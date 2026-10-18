@@ -8,6 +8,7 @@
 #include "core/tree.h"
 #include "ui/anim.h"
 #include "ui/camera.h"
+#include "ui/focus.h"
 #include "ui/html_text.h"
 #include "ui/layout.h"
 #include "ui/progress.h"
@@ -471,6 +472,14 @@ static void test_scene_lod() {
     CHECK_EQ(near(std::hypot(cs.clusters[0].pos.x, cs.clusters[0].pos.y), 1), true);  // on the members' ring
 }
 
+static void test_focus() {
+    CHECK_EQ(next_focus(Focus::Omni, true) == Focus::Preview, true);
+    CHECK_EQ(next_focus(Focus::Omni, false) == Focus::Graph, true);  // no preview: skip it
+    CHECK_EQ(next_focus(Focus::Preview, true) == Focus::Graph, true);
+    CHECK_EQ(next_focus(Focus::Graph, true) == Focus::Omni, true);
+    CHECK_EQ(next_focus(Focus::Graph, false) == Focus::Omni, true);
+}
+
 // A fake web: home -> a, b ; a -> a1 ; b fails. The tap must pass results through untouched.
 struct FakeWeb : LinkSource {
     std::optional<std::vector<std::string>> links(const std::string& url) override {
@@ -538,6 +547,7 @@ int main() {
     test_layout();
     test_layout_site_groups();
     test_scene_lod();
+    test_focus();
     test_fit();
     test_short_label();
     test_replay();

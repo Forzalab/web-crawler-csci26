@@ -260,8 +260,14 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
     return dbox({cv, vbox({filler(), hbox(std::move(legend))})});
 }
 
+Color focus_border(bool focused, float glow, float flash) {
+    if (!focused) return th::kFaint;
+    Color c = Color::Interpolate(std::clamp(glow, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+    return Color::Interpolate(std::clamp(flash, 0.0f, 1.0f), c, th::kText);
+}
+
 Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_depth,
-                 bool flash_size) {
+                 bool flash_size, Color rule) {
     return vbox({
         hbox({
             text(" "),
@@ -270,13 +276,13 @@ Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_de
             meter("LINKS", size, max_size, flash_size),
             text(" "),
         }),
-        separatorLight() | color(th::kFaint),
+        separatorLight() | color(rule),
     });
 }
 
-Element input_box(Element input) {
+Element input_box(Element input, Color border) {
     // White on black incl. the border; NO_COLOR keeps border + plain text.
-    return std::move(input) | color(Color::White) | borderStyled(ROUNDED, th::kAccent) | bgcolor(Color::Black);
+    return std::move(input) | color(Color::White) | borderStyled(ROUNDED, border) | bgcolor(Color::Black);
 }
 
 Element input_text(Element input, bool placeholder) {
@@ -291,7 +297,7 @@ Element field(const std::string& label, Element input, int width) {
 }
 
 Element omnibar(Element input, const std::vector<std::string>& results, int selected,
-                const std::string& ghost) {
+                const std::string& ghost, Color border) {
     Elements rows;
     // Drop up: results[0] sits right above the input line.
     for (int i = int(results.size()) - 1; i >= 0; --i) {
@@ -307,7 +313,7 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
     Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input) | xflex_factor(0, 1), text(first) | color(th::kChrome), filler()})};
     for (size_t p = ghost.find('\n'); p != std::string::npos; p = ghost.find('\n', p + 1))
         box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome) | dim);
-    rows.push_back(input_box(vbox(std::move(box))));
+    rows.push_back(input_box(vbox(std::move(box)), border));
     // Centred column, <= 60 cols and <= half the screen; results share it.
     return std::make_shared<CenterCap>(vbox(std::move(rows)), 60);
 }
@@ -329,8 +335,7 @@ Element too_small(int w, int h) {
 }
 
 Element preview(const std::string& title, const std::vector<std::string>& lines, int scroll,
-                float glow, bool maximized) {
-    Color edge = Color::Interpolate(std::clamp(glow, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+                Color edge, bool maximized) {
     Elements body;
     for (size_t i = size_t(std::max(0, scroll)); i < lines.size(); ++i) {
         const std::string& ln = lines[i];
@@ -343,7 +348,7 @@ Element preview(const std::string& title, const std::vector<std::string>& lines,
     }
     Element content = vbox({
         vbox(std::move(body)) | flex,
-        text("j/k scroll · m max · Esc close") | dim | color(th::kChrome),
+        text("Tab focus · j/k scroll · m max · Esc close") | dim | color(th::kChrome),
     });
     // color() paints the border; every child above sets its own colour on top.
     Element panel = window(text(" PREVIEW · " + title + " ") | bold | color(th::kAccent),

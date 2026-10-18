@@ -416,14 +416,14 @@ static std::vector<std::string> page_lines() {
 }
 
 static void test_preview() {
-    std::string out = render(views::preview("maps.google.com", page_lines(), 0, 1.0f, false), 80, 16);
+    std::string out = render(views::preview("maps.google.com", page_lines(), 0, views::focus_border(true, 1.0f, 0), false), 80, 16);
     CHECK(line_of(out, 0).find("PREVIEW · maps.google.com") != std::string::npos, out);
     CHECK(line_of(out, 0).find("╭") != std::string::npos, out);
     CHECK_HAS(out, "Google Maps");
     CHECK_LACKS(out, "# Google");
     CHECK_HAS(out, "- Directions");
     CHECK_HAS(out, "[IMG");
-    CHECK_HAS(out, "Esc close");
+    CHECK_HAS(out, "Tab focus · j/k scroll · m max · Esc close");
     std::string top = line_of(out, 0);
     size_t a = top.find("╭"), b = top.find("╮");
     auto cols = [](const std::string& s) {
@@ -432,13 +432,36 @@ static void test_preview() {
         return n;
     };
     CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 <= 60, out);
-    out = render(views::preview("maps.google.com", page_lines(), 1, 0.0f, false), 80, 16);
+    out = render(views::preview("maps.google.com", page_lines(), 1, views::focus_border(true, 0.0f, 0), false), 80, 16);
     CHECK_LACKS(out, "Google Maps");
     CHECK_HAS(out, "Find local");
-    out = render(views::preview("maps.google.com", page_lines(), 0, 0.5f, true), 100, 16);
+    out = render(views::preview("maps.google.com", page_lines(), 0, views::focus_border(true, 0.5f, 0), true), 100, 16);
     top = line_of(out, 0);
     a = top.find("╭"), b = top.find("╮");
     CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 > 60, out);
+}
+
+// One look for focus: unfocused faint, focused dim orange <-> orange, a fresh change flashes white.
+static void test_focus_border() {
+    CHECK(views::focus_border(false, 1, 1) == theme::kFaint, "unfocused");
+    CHECK(views::focus_border(true, 0, 0) == theme::kAccentDim, "glow 0");
+    CHECK(views::focus_border(true, 1, 0) == theme::kAccent, "glow 1");
+    CHECK(views::focus_border(true, 1, 1) == theme::kText, "flash 1");
+    CHECK(views::focus_border(true, 1, 0.5f) == Color::Interpolate(0.5f, theme::kAccent, theme::kText), "flash 0.5");
+    // Unfocused omnibar: faint border (cell 0,0 is its top-left corner at this size); focused: orange.
+    auto corner = [](Color border) {
+        Screen s = Screen::Create(Dimension::Fixed(40), Dimension::Fixed(3));
+        Render(s, views::omnibar(text("x"), {}, -1, "", border));
+        int x = 0;
+        while (x < 40 && s.PixelAt(x, 0).character != "╭") ++x;
+        return x < 40 ? s.PixelAt(x, 0).foreground_color : Color::Default;
+    };
+    CHECK(corner(views::focus_border(false, 1, 0)) == theme::kFaint, "omnibar unfocused");
+    CHECK(corner(views::focus_border(true, 1, 0)) == theme::kAccent, "omnibar focused");
+    // The boss-bar rule takes the graph's focus colour.
+    Screen s = Screen::Create(Dimension::Fixed(80), Dimension::Fixed(2));
+    Render(s, views::boss_bar(1, 3, 5, 50, false, false, theme::kAccent));
+    CHECK(s.PixelAt(10, 1).foreground_color == theme::kAccent, s.ToString());
 }
 
 static void test_coach() {
@@ -578,7 +601,7 @@ static void dump_main() {
         views::graph(scene(k), k.f, v) | flex,
         views::omnibar(text(""), {}, -1, "type to search · /bridges"),
     });
-    main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, 1.0f,
+    main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, theme::kAccent,
                                                       false)})});
     std::cout << render(main, 100, 30) << "\n";
 }
@@ -634,6 +657,7 @@ int main() {
     test_toast_too_small();
     test_preview();
     test_coach();
+    test_focus_border();
     test_loading();
     if (std::getenv("WC_VIEWS_DUMP")) dump_main();
     if (std::getenv("WC_VIEWS_BENCH")) bench();
