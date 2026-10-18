@@ -19,13 +19,30 @@ namespace th = wc::theme;
 
 namespace {
 
-// Dotted line: every other sub-pixel along the major axis.
-void dotted(Canvas& c, int x1, int y1, int x2, int y2, const Color& col) {
-    int n = std::max(std::abs(x2 - x1), std::abs(y2 - y1));
-    for (int i = 0; i <= n; i += 2) {
-        double t = n ? double(i) / n : 0;
-        c.DrawPoint(int(std::lround(x1 + (x2 - x1) * t)), int(std::lround(y1 + (y2 - y1) * t)),
-                    true, col);
+// Dotted line: every `step`-th sub-pixel along the major axis, clipped to the
+// canvas first (Liang-Barsky), so an edge mostly off screen costs only its
+// visible dots. The first visible dot is rounded up to the step: the dots keep
+// their place along the line while it pans (no shimmer).
+void dotted(Canvas& c, int x1, int y1, int x2, int y2, const Color& col, int step) {
+    const int dx = x2 - x1, dy = y2 - y1, n = std::max(std::abs(dx), std::abs(dy));
+    double t0 = 0, t1 = 1;
+    const double p[] = {double(-dx), double(dx), double(-dy), double(dy)};
+    const double q[] = {double(x1), double(c.width() - 1 - x1), double(y1), double(c.height() - 1 - y1)};
+    for (int k = 0; k < 4; ++k) {
+        if (p[k] == 0) {
+            if (q[k] < 0) return;  // parallel to this edge and outside it
+            continue;
+        }
+        double r = q[k] / p[k];
+        if (p[k] < 0) t0 = std::max(t0, r);
+        else t1 = std::min(t1, r);
+    }
+    if (t0 > t1) return;
+    if (n == 0) return c.DrawPoint(x1, y1, true, col);
+    int i0 = int(std::ceil(t0 * n / step)) * step, i1 = int(std::floor(t1 * n));
+    for (int i = i0; i <= i1; i += step) {
+        double t = double(i) / n;
+        c.DrawPoint(int(std::lround(x1 + dx * t)), int(std::lround(y1 + dy * t)), true, col);
     }
 }
 
@@ -79,9 +96,15 @@ private:
 
 }  // namespace
 
-Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v) {
-    // Copies: the lambda runs at render time, after the caller's frame may be gone.
-    Element cv = canvas([g, l, f, v](Canvas& c) {
+Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom) {
+    const Layout& l = scene->lay;
+    // The lambda runs at render time, after the caller's frame may be gone: it shares
+    // the scene (no copy) and owns the frame.
+    Element cv = canvas([scene, f = std::move(f), v, zoom](Canvas& c) {
+        const CrawlGraph& g = scene->g;
+        const Layout& l = scene->lay;
+        const ReplayPlan& plan = scene->plan;
+        const int step = zoom < 0.6 ? 4 : 2;  // zoomed far out: sparser dots
         auto sx = [&](int id) { return l.pos[id].x * v.scale + v.ox; };
         auto sy = [&](int id) { return l.pos[id].y * v.scale + v.oy; };
         auto shown = [&](int id) {
@@ -98,16 +121,16 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
         }
         // Edges next, so nodes and labels sit on top. Cross-links (seen) always
         // drawn: the dense core is the look Tony wants (decision 2026-10-17).
-        for (size_t e = 0; e < g.edges.size() && e < f.edge_t.size(); ++e) {
+        for (size_t e = 0; e < g.edges.size() && e < f.edge_t.size() && e < plan.from.size(); ++e) {
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
             if (t <= 0) continue;
-            int a = g.id_of(g.edges[e].from), b = g.id_of(g.edges[e].to);
+            int a = plan.from[e], b = plan.to[e];
             if (!shown(a) || !shown(b)) continue;
             int x1 = int(std::lround(sx(a))), y1 = int(std::lround(sy(a)));
             int x2 = int(std::lround(sx(a) + (sx(b) - sx(a)) * t));
             int y2 = int(std::lround(sy(a) + (sy(b) - sy(a)) * t));
             Color col = g.edges[e].seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth));
-            dotted(c, x1, y1, x2, y2, col);
+            dotted(c, x1, y1, x2, y2, col, step);
         }
         // Nodes: glyph (+ label for depth < 2), snapped to cells. Labels go in
         // id order (shallow first); one that would overlap a glyph or an

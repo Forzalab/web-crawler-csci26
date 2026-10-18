@@ -46,6 +46,7 @@
 #include "ui/osc52.h"
 #include "ui/progress.h"
 #include "ui/replay.h"
+#include "ui/scene.h"
 #include "ui/term_lock.h"
 #include "ui/theme.h"
 #include "ui/views.h"
@@ -191,8 +192,7 @@ int tui_main(int argc, char** argv) {
     Clock::time_point crawl_t0;
 
     // Main screen state.
-    Layout lay;
-    int64_t replay_total = 0;  // content ms of the whole replay (replay_ms), warped by replay_clock
+    std::shared_ptr<const Scene> scene;  // g + layout + replay plan, rebuilt once per finished crawl
     Clock::time_point t0, toast_at, flash_depth_at, flash_size_at;
     bool flashed_depth = false, flashed_size = false, bridges_shown = false;
     std::string toast_text;
@@ -307,8 +307,7 @@ int tui_main(int argc, char** argv) {
             step = Step::Summary;
             return;
         }
-        lay = radial_layout(g);
-        replay_total = replay_ms(g);
+        scene = std::make_shared<const Scene>(make_scene(g));
         t0 = last_frame = last_input = Clock::now();
         step = Step::Main;
         tab = 2;
@@ -348,8 +347,8 @@ int tui_main(int argc, char** argv) {
 
     auto main_screen = [&]() -> Element {
         // Slow first fetches, then faster; ends when the old linear replay did.
-        int64_t el = no_anim || resumed ? INT64_MAX / 4 : replay_clock(ms_since(t0), replay_total);
-        ReplayFrame f = replay_at(g, el);
+        int64_t el = no_anim || resumed ? INT64_MAX / 4 : replay_clock(ms_since(t0), scene->plan.total_ms);
+        ReplayFrame f = replay_at(scene->g, scene->plan, el);
         if (!flashed_depth && f.depth >= cfg.maxDepth) flashed_depth = true, flash_depth_at = Clock::now();
         if (!flashed_size && f.size >= cfg.maxSize) flashed_size = true, flash_size_at = Clock::now();
         auto flashing = [&](bool on, Clock::time_point at) {
@@ -386,7 +385,8 @@ int tui_main(int argc, char** argv) {
         } else {
             for (int id : hits) {
                 const Node& n = g.nodes[id];
-                rows.push_back(std::string(th::glyph(size_t(id) < lay.shape.size() ? lay.shape[id] : -1, n.status)) + " " + node_label(n.url, g.nodes[0].url) + "  d" + std::to_string(n.depth));
+                const auto& shape = scene->lay.shape;
+                rows.push_back(std::string(th::glyph(size_t(id) < shape.size() ? shape[id] : -1, n.status)) + " " + node_label(n.url, g.nodes[0].url) + "  d" + std::to_string(n.depth));
             }
         }
         std::string ghost = complete(omni_text);
@@ -398,10 +398,10 @@ int tui_main(int argc, char** argv) {
         // Canvas sub-pixels: 2 per col, 4 per row, minus boss bar (2) + omnibar (3 + results).
         auto ts = Terminal::Size();
         int rows_left = std::max(1, ts.dimy - 2 - 3 - int(rows.size()) - extra);
-        View v = apply(cam, fit(lay, ts.dimx * 2, rows_left * 4), ts.dimx * 2, rows_left * 4);
+        View v = apply(cam, fit(scene->lay, ts.dimx * 2, rows_left * 4), ts.dimx * 2, rows_left * 4);
 
         Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs),
-                             views::graph(g, lay, f, v) | flex,
+                             views::graph(scene, f, v, cam.zoom) | flex,
                              views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost)});
         // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast (top right, under the boss bar).
         if (pv_open) {

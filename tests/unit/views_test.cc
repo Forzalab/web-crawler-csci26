@@ -58,6 +58,9 @@ struct Fake {
     ReplayFrame f;
 };
 
+// The view takes a shared Scene: the fake's graph + hand-placed layout.
+static std::shared_ptr<const Scene> scene(const Fake& k) { return std::make_shared<const Scene>(make_scene(k.g, k.l)); }
+
 // root -> {google, github}; google -> maps (depth 2) -> deep (3); github -> google (SEEN)
 static Fake fake_graph() {
     Fake k;
@@ -118,7 +121,7 @@ static bool sticks(const std::string& out) {
 static void test_graph() {
     Fake k = fake_graph();
     View v{30, 80, 30};  // canvas 160x96 sub-pixels at 80x24
-    std::string out = render(views::graph(k.g, k.l, k.f, v));
+    std::string out = render(views::graph(scene(k), k.f, v));
     CHECK_HAS(out, "google.com");
     CHECK_HAS(out, "example.org");
     CHECK_LACKS(out, "maps.test");  // depth 2: glyph only
@@ -130,7 +133,7 @@ static void test_graph() {
 
     k.f.node_t = {1, 0, 0, 0, 0};  // only root shown, edges not started
     k.f.edge_t = {0, 0, 0, 0, 0};
-    out = render(views::graph(k.g, k.l, k.f, v));
+    out = render(views::graph(scene(k), k.f, v));
     CHECK_HAS(out, "example.org");
     CHECK_LACKS(out, "google.com");
 }
@@ -156,7 +159,7 @@ static void test_graph_same_site() {
     k.f.node_t = {1, 1, 1, 1};
     k.f.edge_t = {1, 1, 1};
     k.f.done = true;
-    std::string out = render(views::graph(k.g, k.l, k.f, View{20, 80, 48}));
+    std::string out = render(views::graph(scene(k), k.f, View{20, 80, 48}));
     CHECK_HAS(out, "/domains");
     CHECK_LACKS(out, "/about");     // collides with /domains, which came first
     CHECK_HAS(out, "icann.org");    // other host: host label
@@ -187,7 +190,7 @@ static void test_label_pad() {
     k.f.node_t = {1, 1, 1};
     k.f.edge_t = {1, 1, 1};
     k.f.done = true;
-    std::string out = render(views::graph(k.g, k.l, k.f, View{10, 80, 48}));
+    std::string out = render(views::graph(scene(k), k.f, View{10, 80, 48}));
     std::string row = line_of(out, 12);
     CHECK(row.find(" /domains ") != std::string::npos, out);
     CHECK(row.find("· /domains ⠁") != std::string::npos, out);  // glyph, pad, label, pad, then the edge
@@ -207,7 +210,7 @@ static void test_label_halo() {
     k.f.node_t = {1, 1, 1, 1};
     k.f.edge_t = {1, 1, 1};
     k.f.done = true;
-    std::string out = render(views::graph(k.g, k.l, k.f, View{10, 40, 48}));
+    std::string out = render(views::graph(scene(k), k.f, View{10, 40, 48}));
     CHECK_HAS(out, "/aaa");
     CHECK_LACKS(out, "/bbb");
     CHECK_HAS(out, "/ccc");
@@ -222,7 +225,7 @@ static void test_label_halo() {
     r.f.node_t = {1, 1};
     r.f.edge_t = {1};
     r.f.done = true;
-    out = render(views::graph(r.g, r.l, r.f, View{10, 80, 48}));
+    out = render(views::graph(scene(r), r.f, View{10, 80, 48}));
     CHECK_HAS(line_of(out, 13), "r.test");
     CHECK_HAS(line_of(out, 14), "/ddd");
 }
@@ -251,7 +254,7 @@ static void test_seen_edges_cap() {
         return k;
     };
     auto mid = [](Fake& k) {  // row 10 (y=2), cols 32..48: only the seen edge passes there
-        std::string row = line_of(render(views::graph(k.g, k.l, k.f, View{10, 80, 20})), 10);
+        std::string row = line_of(render(views::graph(scene(k), k.f, View{10, 80, 20})), 10);
         size_t b = 0, col = 0;
         while (b < row.size() && col < 32) col += (static_cast<unsigned char>(row[b++]) & 0xC0) != 0x80;
         size_t e = b;
@@ -546,7 +549,7 @@ static void dump_main() {
     View v{36, 110, 24};
     auto main = vbox({
         views::boss_bar(2, 3, 140, 200, false, false),
-        views::graph(k.g, k.l, k.f, v) | flex,
+        views::graph(scene(k), k.f, v) | flex,
         views::omnibar(text(""), {}, -1, "type to search · /bridges"),
     });
     main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, 1.0f,
@@ -570,19 +573,20 @@ static void bench() {
         if (!g.has_edge(u(a), u(b))) g.add_edge(u(a), u(b), true);
     }
     for (int i = 0; i < 1000; ++i) g.record_fetch(u(i), true);
-    Layout l = radial_layout(g);
+    auto sc = std::make_shared<const Scene>(make_scene(g));
+    const Layout& l = sc->lay;
     const int w = 200, h = 60, frames = 50;
     using Ms = std::chrono::duration<double, std::milli>;
     auto t0 = std::chrono::steady_clock::now();
     ReplayFrame f;
-    for (int i = 0; i < frames; ++i) f = replay_at(g, 1000000);
+    for (int i = 0; i < frames; ++i) f = replay_at(sc->g, sc->plan, 1000000);
     double replay = Ms(std::chrono::steady_clock::now() - t0).count() / frames;
     std::cout << "bench: " << g.nodes.size() << " nodes, " << g.edges.size() << " edges, " << w << "x" << h << "\n";
     std::cout << "  replay_at       " << replay << " ms/frame\n";
     for (double zoom : {1.0, 4.0}) {
         View v = apply(Camera{zoom, 0, 0}, fit(l, w * 2, (h - 5) * 4), w * 2, (h - 5) * 4);
         t0 = std::chrono::steady_clock::now();
-        for (int i = 0; i < frames; ++i) render(views::graph(g, l, f, v), w, h - 5);
+        for (int i = 0; i < frames; ++i) render(views::graph(sc, f, v, zoom), w, h - 5);
         std::cout << "  graph zoom " << zoom << "    " << Ms(std::chrono::steady_clock::now() - t0).count() / frames << " ms/frame\n";
     }
 }

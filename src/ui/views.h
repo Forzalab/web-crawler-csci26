@@ -2,6 +2,7 @@
 // so every view renders headless (tests/unit/ui_test.cc snapshots).
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,11 +12,13 @@
 #include "ui/layout.h"
 #include "ui/progress.h"
 #include "ui/replay.h"
+#include "ui/scene.h"
 
 namespace wc::views {
 
-// The graph, drawn on an ftxui::Canvas that fills the given box.
-ftxui::Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v);
+// The graph, drawn on an ftxui::Canvas that fills the given box. zoom = the
+// camera's (1 = fit): far out (< 0.6) edges get sparser dots.
+ftxui::Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom = 1);
 
 // Top bar: two meters. flash = limit just hit (caller pulses it 1-2x).
 ftxui::Element boss_bar(int depth, int max_depth, int size, int max_size,

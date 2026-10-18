@@ -63,6 +63,7 @@ endif()
 add_library(wc_ui_logic STATIC
   src/ui/layout.cc
   src/ui/replay.cc
+  src/ui/scene.cc
   src/ui/omni_query.cc
   src/ui/osc52.cc
   src/ui/camera.cc
