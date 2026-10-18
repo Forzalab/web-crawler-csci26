@@ -151,6 +151,76 @@ static void test_replay() {
     CHECK_EQ(m.edge_t[3], 0.5f);   // a -> a1
     CHECK_EQ(m.edge_t[4], 0.25f);  // a -> a2
     CHECK_EQ(m.node_t[4], 0.5f);
+
+    // Small crawl: well under the 8 s budget, so the per-fetch schedule is kept as is.
+    // Edges: home->a b c (fetch 0), a->a1 a2 (fetch 1), b->home a1 (fetch 2), c->z (fetch 3).
+    ReplayPlan p = replay_plan(r);
+    const double want[] = {0, 62.5, 125, 120, 182.5, 240, 302.5, 360};
+    bool starts = p.start.size() == 8;
+    for (size_t i = 0; starts && i < 8; ++i) starts = near(p.start[i], want[i]);
+    CHECK_EQ(starts, true);
+    CHECK_EQ(p.edge_ms, 250.0);
+    CHECK_EQ(p.end, 610.0);
+    CHECK_EQ(p.total_ms, int64_t(610));
+    CHECK_EQ(p.from[6], 2);
+    CHECK_EQ(p.to[6], 4);
+    CHECK_EQ(replay_ms(r), int64_t(610));
+    // Unfetched source: never animates.
+    CHECK_EQ(replay_plan(g).start.size(), size_t(7));
+    CHECK_EQ(replay_at(r, p, 609).done, false);
+    CHECK_EQ(replay_at(r, p, 610).done, true);
+
+    // Big crawl: 1000-node 10-ary tree (node i -> 10i+1 .. 10i+10), fetches 0..99.
+    // Per fetch it would take 100*120 ms+: too long, so it becomes a 3-level wave in 8 s.
+    CrawlGraph tree;
+    auto u = [](int i) { return "https://t.test/" + std::to_string(i); };
+    tree.add_node(u(0), 0);
+    for (int i = 0; i < 100; ++i) {
+        for (int c = 10 * i + 1; c <= 10 * i + 10 && c < 1000; ++c) {
+            tree.add_node(u(c), tree.nodes[size_t(i)].depth + 1);
+            tree.add_edge(u(i), u(c), false);
+        }
+        tree.record_fetch(u(i), true);
+    }
+    CHECK_EQ(tree.nodes.size(), size_t(1000));
+    ReplayPlan w = replay_plan(tree);
+    CHECK_EQ(w.total_ms, int64_t(8000));
+    CHECK_EQ(replay_ms(tree), int64_t(8000));
+    CHECK_EQ(replay_at(tree, w, 7999).done, false);
+    CHECK_EQ(replay_at(tree, w, 8000).done, true);
+    CHECK_EQ(replay_at(tree, w, 8000).size, 1000);
+    // 3 levels x 4 batches (10 kids, 3 per batch): gap = (8000 - 3*250) / 12 ms.
+    const double gap = (8000.0 - 750) / 12;
+    CHECK_EQ(near(w.start[0], 0) && near(w.start[2], 0) && near(w.start[3], gap) && near(w.start[9], 3 * gap), true);
+    CHECK_EQ(near(w.start[10], 4 * gap + 250), true);       // node 1's first kid: level 1 starts
+    CHECK_EQ(near(w.start[13], 5 * gap + 250), true);       // node 1's 4th kid: second batch
+    CHECK_EQ(near(w.start[110], 8 * gap + 500), true);      // node 11's first kid: level 2
+    CHECK_EQ(near(w.start[20], w.start[10]), true);         // node 2: same level, same start
+    // Every parent has fully landed before an edge leaves it.
+    std::vector<double> landed(tree.nodes.size(), 0.0);
+    for (size_t i = 0; i < tree.edges.size(); ++i) landed[size_t(w.to[i])] = w.start[i] + w.edge_ms;
+    bool parent_first = true;
+    for (size_t i = 0; i < tree.edges.size(); ++i) parent_first = parent_first && landed[size_t(w.from[i])] <= w.start[i];
+    CHECK_EQ(parent_first, true);
+    // Mid-way the depth-1 ring is complete and part of depth 2 is in.
+    ReplayFrame mid = replay_at(tree, w, int64_t(4 * gap + 500 + 1));  // level 1's first batch has landed
+    CHECK_EQ(mid.depth, 2);
+    CHECK_EQ(mid.size < 1000, true);
+
+    // Deep chain: 80 levels x 250 ms > 8 s even with no gaps: squeezed, still 8 s, still in order.
+    CrawlGraph chain;
+    chain.add_node(u(0), 0);
+    for (int i = 1; i <= 80; ++i) {
+        chain.add_node(u(i), i);
+        chain.add_edge(u(i - 1), u(i), false);
+        chain.record_fetch(u(i - 1), true);
+    }
+    ReplayPlan c = replay_plan(chain);
+    CHECK_EQ(c.total_ms, int64_t(8000));
+    CHECK_EQ(near(c.edge_ms, 100), true);  // 250 * 8000 / (80 * 250)
+    CHECK_EQ(near(c.start[79], 7900), true);
+    CHECK_EQ(replay_at(chain, c, 8000).size, 81);
+    CHECK_EQ(replay_at(chain, c, 7999).size, 80);
 }
 
 static void test_anim() {
@@ -205,6 +275,7 @@ static void test_replay_clock() {
     r.add_edge("https://c.com/", "https://z.com/", false);
     r.record_fetch("https://c.com/", true);
     const int64_t total = replay_ms(r);
+    CHECK_EQ(total, int64_t(610));
     CHECK_EQ(replay_at(r, total).done, true);
     CHECK_EQ(replay_at(r, total - 1).done, false);
     // Schedule: monotonic, first fetch clearly slower than linear, done on time (<= +20%).
@@ -225,8 +296,9 @@ static void test_replay_clock() {
     // Tiny replay (< 1 s): the slow phase is short, but the first node still lands later than linear.
     CHECK_EQ(first_at >= linear_first * 13 / 10, true);
     CHECK_EQ(done_at > 0 && done_at <= total * 12 / 10, true);
-    // A long crawl (500 fetches): the first steps are slow, the whole replay still ends on time.
-    const int64_t big = 500 * 120 + 250;
+    CHECK_EQ(done_at, int64_t(610));
+    // A long crawl (the 8 s budget): the first steps are slow, the whole replay still ends on time.
+    const int64_t big = 8000;
     CHECK_EQ(replay_clock(big, big), big);
     int64_t w1 = 0;
     while (replay_clock(w1, big) < 120) ++w1;  // wall time for the first fetch step

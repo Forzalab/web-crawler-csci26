@@ -1,6 +1,9 @@
 // replay.h - animate a finished crawl as if live. Pure: f(graph, ms).
 // Fetch k starts at k*step_ms. Its edges (recording order) grow over
 // edge_ms; a NEW edge's child node appears when its edge lands.
+// Big crawls would take minutes that way, so a schedule that ends after
+// budget_ms becomes a wave instead: one BFS level at a time, every fetch of
+// the level at once, siblings landing `batch` at a time. Never over budget_ms.
 #pragma once
 
 #include <cstdint>
@@ -18,7 +21,19 @@ struct ReplayFrame {
     bool done = false;          // everything landed
 };
 
-struct ReplayTiming { int step_ms = 120; int edge_ms = 250; };
+struct ReplayTiming { int step_ms = 120; int edge_ms = 250; int budget_ms = 8000; int batch = 3; };
+
+// The whole schedule, computed once per graph (replay_at is then cheap per frame).
+struct ReplayPlan {
+    std::vector<int> from, to;   // per edge: node ids (-1 if absent)
+    std::vector<double> start;   // per edge: start ms (-1 = `from` never fetched, never animates)
+    double edge_ms = 0;          // grow time of every edge
+    double end = 0;              // done at this ms
+    int64_t total_ms = 0;        // ceil(end) = min(the per-fetch schedule, budget_ms)
+};
+
+ReplayPlan replay_plan(const CrawlGraph& g, ReplayTiming t = {});
+ReplayFrame replay_at(const CrawlGraph& g, const ReplayPlan& p, int64_t elapsed_ms);
 
 ReplayFrame replay_at(const CrawlGraph& g, int64_t elapsed_ms, ReplayTiming t = {});
 
