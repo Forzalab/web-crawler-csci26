@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <unordered_map>
+
+#include "core/tree.h"
 
 namespace wc {
 
@@ -11,28 +14,23 @@ Layout radial_layout(const CrawlGraph& g) {
     const int n = static_cast<int>(g.nodes.size());
     Layout l;
     l.pos.assign(n, Pt{});
-    l.parent.assign(n, -1);
     if (n == 0) return l;
+    l.parent = tree_parents(g);  // first NEW edge into each node (core/tree.h)
 
-    // Tree: first NEW edge into each node. Require from-id < to-id (discovery
-    // order) so the tree is acyclic even on odd input.
-    for (const Edge& e : g.edges) {
-        if (e.seen) continue;
-        int to = g.id_of(e.to), from = g.id_of(e.from);
-        if (to <= 0 || from < 0 || from >= to || l.parent[to] != -1) continue;
-        l.parent[to] = from;
+    // Sites by first appearance: same-site siblings sit side by side (clusters, legend).
+    std::vector<std::string> site(n);
+    std::unordered_map<std::string, int> first;
+    std::vector<int> site_first(n);
+    for (int i = 0; i < n; ++i) {
+        site[i] = site_of(g.nodes[i].url);
+        site_first[i] = first.emplace(site[i], int(first.size())).first->second;
     }
-
-    // Children in id order; orphans (non-root, no parent) hang off root's wedge.
+    // Children in id order, then grouped by site (stable); orphans hang off root's wedge.
     std::vector<std::vector<int>> kids(n);
     for (int i = 1; i < n; ++i) kids[l.parent[i] >= 0 ? l.parent[i] : 0].push_back(i);
-
-    // Leaf counts: parents have smaller ids, so a descending sweep suffices.
-    std::vector<int> leaves(n, 0);
-    for (int i = n - 1; i >= 0; --i) {
-        if (kids[i].empty()) leaves[i] = 1;
-        for (int c : kids[i]) leaves[i] += leaves[c];
-    }
+    for (auto& k : kids)
+        std::stable_sort(k.begin(), k.end(), [&](int a, int b) { return site_first[a] < site_first[b]; });
+    const std::vector<int> leaves = subtree_leaves(l.parent);
 
     const double kTau = 2.0 * M_PI;
     std::vector<double> lo(n, 0.0), span(n, 0.0);
@@ -51,16 +49,8 @@ Layout radial_layout(const CrawlGraph& g) {
         l.pos[i] = Pt{r * std::cos(ang), r * std::sin(ang)};
     }
     // Shapes: one per site, most nodes first, ties by first appearance.
-    std::vector<std::pair<std::string, int>> count;  // (site, nodes), first-seen order
-    std::vector<int> site_idx(n);
-    for (int i = 0; i < n; ++i) {
-        std::string s = site_of(g.nodes[i].url);
-        int k = 0;
-        while (k < int(count.size()) && count[k].first != s) ++k;
-        if (k == int(count.size())) count.push_back({s, 0});
-        ++count[k].second;
-        site_idx[i] = k;
-    }
+    std::vector<std::pair<std::string, int>> count(first.size());  // (site, nodes), first-seen order
+    for (int i = 0; i < n; ++i) count[site_first[i]].first = site[i], ++count[site_first[i]].second;
     std::vector<int> order(count.size());
     for (size_t k = 0; k < order.size(); ++k) order[k] = int(k);
     std::stable_sort(order.begin(), order.end(),
@@ -71,7 +61,7 @@ Layout radial_layout(const CrawlGraph& g) {
         l.sites.push_back(count[order[r]].first);
     }
     l.shape.resize(n);
-    for (int i = 0; i < n; ++i) l.shape[i] = rank[site_idx[i]];
+    for (int i = 0; i < n; ++i) l.shape[i] = rank[site_first[i]];
     return l;
 }
 

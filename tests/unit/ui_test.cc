@@ -1,9 +1,11 @@
 // ui_test.cc - unit tests for src/ui/layout, replay, camera, html_text (pure TUI logic).
 // Run: build/wc_ui_test   (exit 1 if any check fails)
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
 #include "core/graph.h"
+#include "core/tree.h"
 #include "ui/anim.h"
 #include "ui/camera.h"
 #include "ui/html_text.h"
@@ -384,6 +386,30 @@ static void test_sites() {
     CHECK_EQ(l.shape[4], 2);
 }
 
+// Same-site siblings sit side by side: kids grouped by their site's first appearance.
+static void test_layout_site_groups() {
+    CrawlGraph g;
+    g.add_node("https://r.org/", 0);
+    const char* kids[] = {"https://ext.org/1", "https://r.org/a", "https://ext.org/2", "https://r.org/b",
+                          "https://ext.org/3", "https://r.org/c"};
+    for (const char* k : kids) {
+        g.add_node(k, 1);
+        g.add_edge(g.nodes[0].url, k, false);
+    }
+    Layout l = radial_layout(g);
+    // Angle order around the root: r.org (seen first, it is the root's site) then ext.org.
+    std::vector<int> ids = {1, 2, 3, 4, 5, 6};
+    std::sort(ids.begin(), ids.end(), [&](int a, int b) {
+        auto ang = [&](int i) { double t = std::atan2(l.pos[i].y, l.pos[i].x); return t < 0 ? t + 2 * M_PI : t; };
+        return ang(a) < ang(b);
+    });
+    std::string sites;
+    for (int i : ids) sites += site_of(g.nodes[size_t(i)].url) + " ";
+    CHECK_EQ(sites, std::string("r.org r.org r.org ext.org ext.org ext.org "));
+    CHECK_EQ(subtree_leaves(l.parent)[0], 6);
+    CHECK_EQ(tree_parents(g)[4], 0);
+}
+
 // A fake web: home -> a, b ; a -> a1 ; b fails. The tap must pass results through untouched.
 struct FakeWeb : LinkSource {
     std::optional<std::vector<std::string>> links(const std::string& url) override {
@@ -449,6 +475,7 @@ int main() {
     test_loading_line();
     test_sites();
     test_layout();
+    test_layout_site_groups();
     test_fit();
     test_short_label();
     test_replay();
