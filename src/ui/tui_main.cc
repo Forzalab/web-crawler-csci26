@@ -277,7 +277,7 @@ int tui_main(int argc, char** argv) {
             HttpClient http(opt);
             const char *sub = std::getenv("WC_BRIDGES_SUB"), *tok = std::getenv("WC_GATEWAY_TOKEN");
             GatewayReply r = gateway_upload(http, gateway, a, sub ? std::atoi(sub) : 0, json, tok ? tok : "");
-            screen.Post([&, refresh, r] {
+            screen.Post([&, refresh, r, note] {  // note by value: this thread (and its copy) is gone when it runs
                 if (!r.error.empty()) return toast("BRIDGES: " + r.error);
                 share_url = r.url;
                 shared = true;

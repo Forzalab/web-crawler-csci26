@@ -141,8 +141,9 @@ start $s 26 2000 || bad="loading screen never shown"
 [ -z "$bad" ] && { waitfor $s 'LINKS 1111/2000' 30 || bad="LINKS 1111/2000 never shown ($(links $s))"; }
 if [ -z "$bad" ]; then
     T send-keys -t $s -l "/bridges"; T send-keys -t $s Enter
-    waitfor $s '1000 of 1111 links' 5 || bad="no '1000 of 1111 links' toast"
+    waitfor $s '1000 of 1111 links' 5 || bad="no '1000 of 1111 links' toast ($(cap $s | grep -oE '✓ [^│]*' | head -n 1))"
     for _ in $(seq 1 50); do [ "$(posts $s)" != 0 ] && break; sleep 0.1; done
+    [ -z "$bad" ] && { waitfor $s 'assignments/26/tony' 5 || bad="no BRIDGES link row after /bridges"; }
     [ -z "$bad" ] && { [ "$(posts $s)" = 1 ] && grep -q "assignment=26&sub=3 1000\$" "$OUT/$s.posts" ||
         bad="upload: $(tr '\n' ';' < "$OUT/$s.posts" 2> /dev/null) (want 1 POST, 1000 nodes)"; }
 fi
