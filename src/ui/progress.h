@@ -23,8 +23,8 @@ struct FetchLine {
 };
 
 struct Progress {
-    int pages = 0, ok = 0, failed = 0;  // fetches so far (pages = ok + failed)
-    int links = 0;                      // links seen on fetched pages (dupes kept)
+    int fetched = 0, ok = 0, failed = 0;  // fetch attempts so far (fetched = ok + failed)
+    int found = 0;                        // distinct URLs found so far (the graph's nodes, uncapped)
     int depth = 0;                      // deepest page fetched
     std::vector<FetchLine> recent;      // last n fetches, oldest first
 };

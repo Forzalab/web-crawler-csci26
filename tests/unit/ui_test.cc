@@ -325,17 +325,18 @@ struct FakeWeb : LinkSource {
 static void test_progress() {
     FakeWeb web;
     ProgressTap tap(web);
-    CHECK_EQ(tap.snapshot().pages, 0);
+    CHECK_EQ(tap.snapshot().fetched, 0);
+    CHECK_EQ(tap.snapshot().found, 0);
     CHECK_EQ(tap.links("https://home.com/")->size(), size_t(2));
     CHECK_EQ(tap.links("https://a.com/")->size(), size_t(2));
     CHECK_EQ(tap.links("https://b.com/").has_value(), false);
     CHECK_EQ(tap.links("https://a.com/1")->size(), size_t(0));
     CHECK_EQ(tap.links("https://nowhere.net/").has_value(), false);  // never a link: keeps the last depth
     Progress p = tap.snapshot();
-    CHECK_EQ(p.pages, 5);
+    CHECK_EQ(p.fetched, 5);
     CHECK_EQ(p.ok, 3);
     CHECK_EQ(p.failed, 2);
-    CHECK_EQ(p.links, 4);
+    CHECK_EQ(p.found, 5);  // home, a, b, a/1, nowhere (home again from a: not new)
     CHECK_EQ(p.depth, 2);
     CHECK_EQ(p.recent.size(), size_t(5));
     CHECK_EQ(p.recent[0].url, std::string("https://home.com/"));
@@ -349,7 +350,7 @@ static void test_progress() {
     CHECK_EQ(t.recent.size(), size_t(2));
     CHECK_EQ(t.recent[0].url, std::string("https://a.com/1"));
     CHECK_EQ(t.recent[1].url, std::string("https://nowhere.net/"));
-    CHECK_EQ(t.pages, 5);
+    CHECK_EQ(t.fetched, 5);
     CHECK_EQ(tap.snapshot(99).recent.size(), size_t(5));
     CHECK_EQ(url_path("https://a.org/x/y?q"), std::string("/x/y?q"));
     CHECK_EQ(url_path("https://a.org"), std::string("/"));

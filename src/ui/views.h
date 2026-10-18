@@ -59,6 +59,7 @@ struct LoadingState {
     int tick = 0;       // spinner frame
     float pulse = 1;
     int cols = 80;      // terminal width: the box is min(64, cols - 2) wide
+    int max_links = 0;  // "links" counter cap (Max links = graph size); 0 = no cap
     Progress progress;
     // Checklist fades: a new line fades in (faint -> its colour, 400 ms, ease-out,
     // timed from FetchLine::at_ms); with a full list the oldest (top) line fades

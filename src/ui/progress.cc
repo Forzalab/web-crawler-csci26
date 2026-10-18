@@ -45,16 +45,16 @@ std::optional<std::vector<std::string>> ProgressTap::links(const std::string& ur
     if (auto it = depth_of_.find(url); it != depth_of_.end()) d = it->second;
     depth_of_.emplace(url, d);
     all_.recent.push_back({url, d, r.has_value(), anim::now_ms()});
-    ++all_.pages;
+    ++all_.fetched;
     (r ? all_.ok : all_.failed)++;
     all_.depth = std::max(all_.depth, d);
     if (r) {
-        all_.links += int(r->size());
         for (const auto& l : *r) {  // parallel crawls land out of order: keep the smallest depth
             auto [it, fresh] = depth_of_.emplace(l, d + 1);
             if (!fresh) it->second = std::min(it->second, d + 1);
         }
     }
+    all_.found = int(depth_of_.size());
     return r;
 }
 

@@ -1,5 +1,5 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
-// URL -> Visualize? -> Max depth -> Max pages -> crawl (live loading screen) -> graph + omnibar.
+// URL -> Visualize? -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
 // Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps.
 // Graph keys (empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
 // Zoom keys that also work mid-typing (Termux extra-keys row): PgUp in, PgDn out (preview closed).
@@ -71,7 +71,7 @@ const std::vector<std::string> kCoach = {
     "/bridges to share.",
 };
 
-enum class Step { Url, Visualize, Depth, Pages, Crawling, Main, Summary };
+enum class Step { Url, Visualize, Depth, Links, Crawling, Main, Summary };
 
 bool settled(const Camera& a, const Camera& b) {
     return std::abs(a.zoom - b.zoom) < 1e-3 && std::abs(a.px - b.px) < 1e-3 && std::abs(a.py - b.py) < 1e-3;
@@ -124,8 +124,9 @@ Element summary_screen(const CrawlGraph& g) {
         return hbox({text(k) | color(th::kChrome) | size(WIDTH, EQUAL, 12), text(std::to_string(v)) | bold | color(th::kText)});
     };
     return step_screen(vbox({text(g.nodes.empty() ? "?" : short_label(g.nodes[0].url)) | bold | color(th::kAccent), text(""),
-                             row("pages", int(g.nodes.size())), row("links", int(g.edges.size())), row("fetched", ok),
-                             row("failed", bad), row("unfetched", un), row("max depth", maxd)}),
+                             row("links", int(g.nodes.size())), row("edges", int(g.edges.size())),
+                             row("fetched", ok), row("failed", bad), row("unfetched", un),
+                             row("max depth", maxd)}),
                        "Esc quit");
 }
 
@@ -414,7 +415,7 @@ int tui_main(int argc, char** argv) {
             body = dbox({body, vbox({filler(), hbox({filler(), c, filler()}),
                                      emptyElement() | size(HEIGHT, EQUAL, 3 + extra + int(rows.size()))})});
         }
-        if (toast_live)  // under the boss bar (2 rows), right edge in line with its PAGES meter
+        if (toast_live)  // under the boss bar (2 rows), right edge in line with its LINKS meter
             body = dbox({body, vbox({emptyElement() | size(HEIGHT, EQUAL, 2), hbox({filler(), views::toast(toast_text), text(" ")}), filler()})});
         return body;
     };
@@ -433,6 +434,7 @@ int tui_main(int argc, char** argv) {
         st.cols = ts.dimx;
         st.pulse = no_anim ? 1.0f : float(0.5 + 0.5 * std::sin(ms / 1000.0 * 2 * M_PI / 1.6));
         st.rows = views::loading_rows(ts.dimy);
+        st.max_links = cfg.maxSize;
         st.progress = tap.snapshot(size_t(st.rows));
         st.fade = !no_anim;
         st.now_ms = anim::now_ms();
@@ -455,7 +457,7 @@ int tui_main(int argc, char** argv) {
                 return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render(),
                                      "y yes · n no · Enter default · Esc quit");
             case Step::Depth: return prompt_screen("Max depth [3]", prompt_in->Render());
-            case Step::Pages: return prompt_screen("Max pages [50]", prompt_in->Render());
+            case Step::Links: return prompt_screen("Max links [50]", prompt_in->Render());
             case Step::Crawling: return crawling_screen(ts);
             case Step::Summary: return summary_screen(g);
             case Step::Main: return main_screen();
@@ -547,11 +549,11 @@ int tui_main(int argc, char** argv) {
             case Step::Depth:
                 if (e == Event::Return) {
                     cfg.maxDepth = int_or(prompt_text, 3);
-                    begin_prompt(Step::Pages, "");
+                    begin_prompt(Step::Links, "");
                     return true;
                 }
                 return false;
-            case Step::Pages:
+            case Step::Links:
                 if (e == Event::Return) {
                     cfg.maxSize = std::max(1, int_or(prompt_text, 50));
                     start_crawl(false);

@@ -186,8 +186,8 @@ static void test_boss_bar() {
     std::string out = render(views::boss_bar(2, 3, 40, 200, false, false), 80, 2);
     CHECK_HAS(out, "DEPTH");
     CHECK_HAS(out, "2/3");
-    CHECK_HAS(out, "PAGES");
-    CHECK_HAS(out, "40/200");
+    CHECK_HAS(out, "LINKS 40/200");
+    CHECK_LACKS(out, "PAGES");
     CHECK_HAS(out, "▰");
     CHECK_HAS(out, "─");  // rule under the bar
     CHECK(out.find("─") >= out.find("\n"), out);  // ...exactly one: row 2 only
@@ -383,14 +383,15 @@ static void test_loading() {
     st.line = "untangling the web…";
     st.tick = 3;
     st.pulse = 0.5f;
-    st.progress.pages = 3, st.progress.ok = 2, st.progress.failed = 1, st.progress.links = 40, st.progress.depth = 1;
+    st.progress.fetched = 3, st.progress.ok = 2, st.progress.failed = 1, st.progress.found = 40, st.progress.depth = 1;
     st.progress.recent = {{"https://www.iana.org/", 0, true}, {"https://www.iana.org/domains", 1, true},
                           {"https://ext.com/very/long/path/that/goes/on/and/on/and/on/forever/more", 1, false}};
     std::string out = render(views::loading(st, emptyElement()), 80, 24);
     CHECK_HAS(out, "⠸ untangling the web…");
     CHECK_HAS(out, "crawling iana.org");
-    CHECK_HAS(out, "pages 3");
+    CHECK_HAS(out, "fetched 3");
     CHECK_HAS(out, "links 40");
+    CHECK_LACKS(out, "pages");
     CHECK_HAS(out, "fail 1");
     CHECK_HAS(out, "depth 1");
     CHECK_HAS(out, "✓ iana.org/");
@@ -422,7 +423,7 @@ static void test_loading() {
         out = render(views::loading(st, rain.render(matrix::kGreenDim) | flex), w, h);
         CHECK_HAS(out, "│ ⠸ untangling the web…");
         CHECK_HAS(out, "│   crawling iana.org ");
-        CHECK_HAS(out, "│ pages 3  links 40  fail 1  depth 1 ");
+        CHECK_HAS(out, "│ fetched 3  links 40  fail 1  depth 1 ");
         CHECK_HAS(out, "│ ✓ iana.org/domains ");
         CHECK_HAS(out, "Esc stop · Ctrl-C quit");
         size_t top = out.find("╭");
@@ -449,6 +450,10 @@ static void test_loading() {
         CHECK(with_rain.size() >= 9 && with_rain == without, out + "\n---\n" + plain);
     }
     st.cols = 80;
+    // links never shows more than Max links (the graph stops there; found keeps counting).
+    st.max_links = 25;
+    CHECK_HAS(render(views::loading(st, emptyElement()), 80, 24), "links 25 ");
+    st.max_links = 0;
     test_loading_fade(st);
     CHECK(views::loading_rows(40) == 32, "loading_rows(40)");
     CHECK(views::loading_rows(5) == 1, "loading_rows(5)");

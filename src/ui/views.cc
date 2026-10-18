@@ -179,7 +179,7 @@ Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_de
             text(" "),
             meter("DEPTH", depth, max_depth, flash_depth),
             filler(),
-            meter("PAGES", size, max_size, flash_size),
+            meter("LINKS", size, max_size, flash_size),
             text(" "),
         }),
         separatorLight() | color(th::kFaint),
@@ -290,7 +290,8 @@ Element loading(const LoadingState& s, Element background) {
     Elements rows = {
         hbox({text(" "), text(spin[s.tick % 10]) | color(th::kAccent), text(" " + s.line) | color(th::kText)}),
         text("   crawling " + s.host) | color(th::kChrome),
-        hbox({count(" pages ", p.pages), count(" links ", p.links), count(" fail ", p.failed), count(" depth ", p.depth)}),
+        hbox({count(" fetched ", p.fetched), count(" links ", s.max_links > 0 ? std::min(p.found, s.max_links) : p.found),
+              count(" fail ", p.failed), count(" depth ", p.depth)}),
         separatorLight() | color(th::kFaint),
     };
     // Checklist: newest at the bottom, brightest; older lines step down toward the chrome grey.
