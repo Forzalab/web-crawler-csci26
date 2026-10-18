@@ -230,41 +230,67 @@ static void test_label_halo() {
     CHECK_HAS(line_of(out, 14), "/ddd");
 }
 
-// Cross-link (seen) edges: drawn up to 40 nodes, skipped beyond.
-static void test_seen_edges_cap() {
+// Level of detail: a SEEN back-link draws on a small graph; with 300 depth-2 tree
+// edges over the budget it is culled at fit, and back at zoom 8 (budget x 8).
+static void test_lod() {
     auto build = [](int extra) {
         Fake k;
         k.g.add_node("https://r.test/", 0);
-        k.g.add_node("https://a.test/", 2);  // depth 2: no label in the way
-        k.g.add_node("https://b.test/", 2);
+        k.g.add_node("https://a.test/", 1);
+        k.g.add_node("https://b.test/", 1);
         k.g.add_edge(k.g.nodes[0].url, k.g.nodes[1].url, false);
         k.g.add_edge(k.g.nodes[0].url, k.g.nodes[2].url, false);
         k.g.add_edge(k.g.nodes[1].url, k.g.nodes[2].url, true);
-        k.l.pos = {{0, 0}, {-2, 2}, {2, 2}};
+        k.l.pos = {{0, 0}, {-2, -1.6}, {-2, 1.6}};  // a -> b runs straight down col 30
         k.l.parent = {-1, 0, 0};
-        for (int i = 0; i < extra; ++i) {
+        for (int i = 0; i < extra; ++i) {  // a's kids, far right: off the a -> b column
             k.g.add_node("https://x" + std::to_string(i) + ".test/", 2);
-            k.l.pos.push_back({0, 0});
-            k.l.parent.push_back(0);
+            k.g.add_edge(k.g.nodes[1].url, k.g.nodes.back().url, false);
+            k.l.pos.push_back({3, 0});
+            k.l.parent.push_back(1);
         }
-        k.f.node_t.assign(k.g.nodes.size(), 0);
-        k.f.node_t[0] = k.f.node_t[1] = k.f.node_t[2] = 1;
-        k.f.edge_t = {1, 1, 1};
+        k.f.node_t.assign(k.g.nodes.size(), 1);
+        k.f.edge_t.assign(k.g.edges.size(), 1);
         k.f.done = true;
         return k;
     };
-    auto mid = [](Fake& k) {  // row 10 (y=2), cols 32..48: only the seen edge passes there
-        std::string row = line_of(render(views::graph(scene(k), k.f, View{10, 80, 20})), 10);
-        size_t b = 0, col = 0;
-        while (b < row.size() && col < 32) col += (static_cast<unsigned char>(row[b++]) & 0xC0) != 0x80;
-        size_t e = b;
-        while (e < row.size() && col < 48) col += (static_cast<unsigned char>(row[e++]) & 0xC0) != 0x80;
-        return row.substr(b, e - b);
+    auto seen_dots = [](const Fake& k, double zoom) {  // braille cells at col 30, rows 7..12 (between a and b)
+        std::string out = render(views::graph(scene(k), k.f, View{10, 80, 40}, zoom), 80, 20);
+        int n = 0;
+        for (int row = 7; row <= 12; ++row) {
+            std::string ln = line_of(out, row);
+            size_t b = 0;
+            for (int col = 0; b < ln.size() && col < 30; ++b) col += (static_cast<unsigned char>(ln[b]) & 0xC0) != 0x80;
+            n += ln.compare(b, 2, "\xe2\xa0") == 0 || ln.compare(b, 2, "\xe2\xa1") == 0 || ln.compare(b, 2, "\xe2\xa2") == 0 ||
+                 ln.compare(b, 2, "\xe2\xa3") == 0;
+        }
+        return n;
     };
-    Fake small = build(0), big = build(38);  // 3 and 41 nodes
-    std::string s = mid(small), l = mid(big);
-    CHECK(s.find_first_not_of(' ') != std::string::npos, s);
-    CHECK(l.find_first_not_of(' ') != std::string::npos, l);  // cross-links always on
+    Fake small = build(0), big = build(300);
+    CHECK(seen_dots(small, 1) >= 4, render(views::graph(scene(small), small.f, View{10, 80, 40}), 80, 20));
+    CHECK(seen_dots(big, 1) == 0, render(views::graph(scene(big), big.f, View{10, 80, 40}), 80, 20));
+    CHECK(seen_dots(big, 8) >= 4, render(views::graph(scene(big), big.f, View{10, 80, 40}, 8), 80, 20));
+}
+
+// 7 ext.org kids of an r.org root fold into one "ext.org ×7" glyph zoomed out, unfold at zoom >= 2.
+static void test_cluster() {
+    Fake k;
+    k.g.add_node("https://r.org/", 0);
+    for (int i = 0; i < 7; ++i) {
+        k.g.add_node("https://ext.org/p" + std::to_string(i), 1);
+        k.g.add_edge(k.g.nodes[0].url, k.g.nodes.back().url, false);
+    }
+    k.l = radial_layout(k.g);
+    k.f.node_t.assign(k.g.nodes.size(), 1);
+    k.f.edge_t.assign(k.g.edges.size(), 1);
+    k.f.done = true;
+    std::string out = render(views::graph(scene(k), k.f, View{12, 80, 48}, 1));
+    CHECK_HAS(out, "ext.org ×7");
+    CHECK_LACKS(out, "/p3");
+    CHECK(!sticks(out), out);
+    out = render(views::graph(scene(k), k.f, View{12, 80, 48}, 3));
+    CHECK_LACKS(out, "×7");
+    CHECK_HAS(out, "ext.org");  // members back, each with its own host label
 }
 
 static void test_boss_bar() {
@@ -597,7 +623,8 @@ int main() {
     test_graph_same_site();
     test_label_pad();
     test_label_halo();
-    test_seen_edges_cap();
+    test_lod();
+    test_cluster();
     test_boss_bar();
     test_omnibar();
     test_omnibar_colors();

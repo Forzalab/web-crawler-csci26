@@ -12,6 +12,7 @@
 #include "ui/layout.h"
 #include "ui/progress.h"
 #include "ui/replay.h"
+#include "ui/scene.h"
 
 using namespace wc;
 
@@ -410,6 +411,66 @@ static void test_layout_site_groups() {
     CHECK_EQ(tree_parents(g)[4], 0);
 }
 
+// Level of detail: draw order, budgets, clusters.
+static void test_scene_lod() {
+    // r -> a b ; a -> a1 ; b -> b1 ; b1 -> x y z ; SEEN: a->b1, x->a, y->a, a1->z
+    CrawlGraph g;
+    auto u = [](const std::string& p) { return "https://s.test/" + p; };
+    g.add_node(u(""), 0);
+    auto kid = [&](const std::string& from, const std::string& to, int d) {
+        g.add_node(u(to), d);
+        g.add_edge(u(from), u(to), false);
+    };
+    kid("", "a", 1), kid("", "b", 1), kid("a", "a1", 2), kid("b", "b1", 2);
+    kid("b1", "x", 3), kid("b1", "y", 3), kid("b1", "z", 3);
+    for (auto [f, t] : {std::pair{"a", "b1"}, {"x", "a"}, {"y", "a"}, {"a1", "z"}}) g.add_edge(u(f), u(t), true);
+    Scene s = make_scene(g);
+    std::string order;
+    for (int e : s.order) order += std::to_string(e) + " ";
+    // Tree to depth <= 1 by leaves (b's 3 first), deeper tree by leaves, then SEEN by in-degree.
+    CHECK_EQ(order, std::string("1 0 3 2 4 5 6 8 9 7 10 "));
+    CHECK_EQ(s.n_always, 2);
+    CHECK_EQ(s.n_tree, 7);
+    std::string leaves, indeg;
+    for (int v : s.leaves) leaves += std::to_string(v);
+    for (int v : s.indeg) indeg += std::to_string(v);
+    CHECK_EQ(leaves, std::string("41313111"));  // r a b a1 b1 x y z
+    CHECK_EQ(indeg, std::string("03112112"));
+    CHECK_EQ(s.clusters.size(), size_t(0));
+    CHECK_EQ(lod_budget(80, 24, 1), 48);
+    CHECK_EQ(lod_budget(40, 10, 1), 24);  // floor
+    CHECK_EQ(lod_budget(200, 60, 1), 300);
+    CHECK_EQ(lod_budget(80, 24, 4), 192);
+    CHECK_EQ(lod_budget(200, 60, 0.1), 75);    // zoom clamped to 0.25
+    CHECK_EQ(lod_budget(200, 60, 32), 4800);   // ... and to 16
+    CHECK_EQ(lod_label_depth(1), 1);
+    CHECK_EQ(lod_label_depth(2.49), 1);
+    CHECK_EQ(lod_label_depth(2.5), 2);
+    CHECK_EQ(lod_label_depth(4.99), 2);
+    CHECK_EQ(lod_label_depth(5) > 100, true);
+
+    // Clusters: r.org -> 7 ext.org kids (one with a kid) + 5 other.org kids + 2 r.org kids.
+    CrawlGraph c;
+    c.add_node("https://r.org/", 0);
+    for (int i = 0; i < 7; ++i) c.add_node("https://ext.org/" + std::to_string(i), 1);
+    for (int i = 0; i < 5; ++i) c.add_node("https://other.org/" + std::to_string(i), 1);
+    for (int i = 0; i < 2; ++i) c.add_node("https://r.org/" + std::to_string(i), 1);
+    for (size_t i = 1; i < c.nodes.size(); ++i) c.add_edge(c.nodes[0].url, c.nodes[i].url, false);
+    for (int i = 0; i < 6; ++i) {  // ext.org/0 -> 6 more.org kids: inside the cluster, never nested
+        c.add_node("https://more.org/" + std::to_string(i), 2);
+        c.add_edge(c.nodes[1].url, c.nodes.back().url, false);
+    }
+    Scene cs = make_scene(c);
+    CHECK_EQ(cs.clusters.size(), size_t(1));  // other.org: 5 < 6; r.org: the parent's own site
+    CHECK_EQ(cs.clusters[0].label, std::string("ext.org ×13"));
+    CHECK_EQ(cs.clusters[0].parent, 0);
+    CHECK_EQ(cs.clusters[0].members.size(), size_t(7));
+    CHECK_EQ(cs.cluster_of[1], 0);
+    CHECK_EQ(cs.cluster_of[15], 0);   // more.org/0, a member's kid
+    CHECK_EQ(cs.cluster_of[8], -1);   // other.org/0
+    CHECK_EQ(near(std::hypot(cs.clusters[0].pos.x, cs.clusters[0].pos.y), 1), true);  // on the members' ring
+}
+
 // A fake web: home -> a, b ; a -> a1 ; b fails. The tap must pass results through untouched.
 struct FakeWeb : LinkSource {
     std::optional<std::vector<std::string>> links(const std::string& url) override {
@@ -476,6 +537,7 @@ int main() {
     test_sites();
     test_layout();
     test_layout_site_groups();
+    test_scene_lod();
     test_fit();
     test_short_label();
     test_replay();
