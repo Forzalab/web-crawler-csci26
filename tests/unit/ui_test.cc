@@ -367,6 +367,8 @@ static void test_html_text() {
     for (int k = 0; k < 3000; ++k) big += "line<br>";
     CHECK_EQ(html_to_lines(big).size(), size_t(2000));
     CHECK_EQ(html_to_lines("").size(), size_t(0));
+    CHECK_EQ(html_title("<html><HEAD><Title lang=en>\n Café  &amp; co </title></head>"), std::string("Café & co"));
+    CHECK_EQ(html_title("<p>no title</p>"), std::string(""));
 }
 
 static void test_sites() {

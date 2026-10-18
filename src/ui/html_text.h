@@ -11,4 +11,7 @@ namespace wc {
 
 std::vector<std::string> html_to_lines(const std::string& html);
 
+// Text of the page's <title>, entities decoded, whitespace collapsed; "" if none.
+std::string html_title(const std::string& html);
+
 }  // namespace wc

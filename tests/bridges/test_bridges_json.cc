@@ -62,7 +62,7 @@ std::vector<Case> cases() {
              m.rescued.insert("http://h/q?a=\"1\"&b=\\");
              return bridges_json(g, m);
          }},
-        {"pretty", [] {  // TUI look: size by in-links, shape by site rank, alpha, link styles
+        {"pretty", [] {  // TUI look: sites, sizes, hub, hover cards, location window, rainbow, link styles
              auto g = graph({{"http://r/", 0}, {"http://r/a", 1}, {"http://x/b", 1}, {"http://y/c", 2}, {"http://r/d", 2}},
                             {{"http://r/", "http://r/a", false},
                              {"http://r/", "http://x/b", false},
@@ -77,6 +77,11 @@ std::vector<Case> cases() {
              BridgesMeta m;
              m.pretty = true;
              m.site_rank = {{"http://r/", 0}, {"http://r/a", 0}, {"http://r/d", 0}, {"http://x/b", 1}, {"http://y/c", -1}};
+             // Layout: ring = depth. Scaled so the farthest coordinate (1.9) lands on 500.
+             m.location = {{"http://r/", {0, 0}}, {"http://r/a", {1, 0}}, {"http://x/b", {-1, 0}},
+                           {"http://y/c", {-1.6, 1.2}}, {"http://r/d", {0.6, -1.9}}};
+             m.labels = {{"http://r/a", "/a"}};          // hub: "★ /a" first in its hover card
+             m.page_titles = {{"http://r/", "Home"}};
              return bridges_json(g, m);
          }},
     };
@@ -91,6 +96,37 @@ std::string ids(const CrawlGraph& g) {
     std::string s;
     for (const Node& n : g.nodes) s += n.url.substr(n.url.rfind('/') + 1) + " ";
     return s;
+}
+
+// Rainbow highway and hubs: deterministic choices.
+void path_hub_tests() {
+    auto u = [](const std::string& p) { return "http://p/" + p; };
+    CrawlGraph g;
+    g.add_node(u("r"), 0);
+    auto kid = [&](const std::string& f, const std::string& t, int d) { g.add_node(u(t), d), g.add_edge(u(f), u(t), false); };
+    kid("r", "a", 1), kid("r", "b", 1), kid("a", "a1", 2), kid("b", "b1", 2), kid("b", "b2", 2);
+    auto path = [&] {
+        std::string s;
+        for (int i : rainbow_path(g)) s += g.nodes[size_t(i)].url.substr(9) + " ";
+        return s;
+    };
+    expect(path() == "r a a1 ", "depth tie, no in-links: lowest id wins: " + path());
+    g.add_edge(u("a1"), u("b2"), true);  // b2 now has 2 in-links: the tie goes to it
+    expect(path() == "r b b2 ", "depth tie: most in-links at the end: " + path());
+    kid("a1", "z", 3);
+    expect(path() == "r a a1 z ", "deepest wins: " + path());
+    expect(rainbow_path(CrawlGraph{}).empty(), "empty graph: no path");
+    // Hubs: >= 2 in-links, most first, ties by id, never the root, at most k.
+    for (const char* f : {"a", "b1", "z"}) g.add_edge(u(f), u("b"), true);  // b: 4 in-links
+    g.add_edge(u("z"), u("a1"), true);                                       // a1: 2
+    g.add_edge(u("b1"), u("r"), true), g.add_edge(u("z"), u("r"), true);     // root: 2, not a hub
+    auto hubs = [&](int k) {
+        std::string s;
+        for (int i : top_hubs(g, k)) s += g.nodes[size_t(i)].url.substr(9) + " ";
+        return s;
+    };
+    expect(hubs(10) == "b a1 b2 ", "hubs: " + hubs(10));
+    expect(hubs(2) == "b a1 ", "top 2: " + hubs(2));
 }
 
 // bridges_subset: the most prominent nodes, parents kept, deterministic.
@@ -176,6 +212,7 @@ int main(int argc, char** argv) {
     if (!same) ++fail;
 
     subset_tests();
+    path_hub_tests();
     std::cout << (subset_fail ? "FAIL " : "PASS ") << "subset (" << checks - subset_fail << "/" << checks << ")\n";
     fail += subset_fail;
 

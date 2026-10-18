@@ -262,16 +262,27 @@ int tui_main(int argc, char** argv) {
         if (up_busy) return toast("still uploading…");
         if (up_worker.joinable()) up_worker.join();
         up_busy = true;
-        CrawlGraph sub = bridges_subset(g);
-        const bool cut = sub.nodes.size() < g.nodes.size();
-        const std::string note = cut ? std::to_string(sub.nodes.size()) + " of " + std::to_string(g.nodes.size()) + " links" : "";
+        CrawlGraph part = bridges_subset(g);
+        const bool cut = part.nodes.size() < g.nodes.size();
+        const std::string note = cut ? std::to_string(part.nodes.size()) + " of " + std::to_string(g.nodes.size()) + " links" : "";
         BridgesMeta meta;
         meta.pretty = true;
         meta.title = (g.nodes.empty() ? std::string("web") : short_label(g.nodes[0].url)) + " crawl" + (cut ? " · " + note : "");
         if (cut) meta.description = note + " shown — most prominent (root, first hop, most linked-to).";
-        for (size_t i = 0; i < g.nodes.size() && i < scene->lay.shape.size(); ++i) meta.site_rank[g.nodes[i].url] = scene->lay.shape[i];
+        // Site ranks, our radial layout (BRIDGES pins located nodes: spread, not one force-layout clump)
+        // and short labels (hub names), all from the scene; titles from the page cache, in the worker.
+        for (size_t i = 0; i < g.nodes.size() && i < scene->lay.pos.size(); ++i) {
+            const std::string& url = g.nodes[i].url;
+            meta.site_rank[url] = scene->lay.shape[i];
+            meta.location[url] = {scene->lay.pos[i].x, scene->lay.pos[i].y};
+            meta.labels[url] = node_label(url, g.nodes[0].url);
+        }
         if (!refresh) toast(cut ? "uploading " + note + " to BRIDGES…" : "uploading to BRIDGES…");
-        up_worker = std::thread([&, refresh, note, a = session_id(), json = bridges_json(sub, meta)] {
+        up_worker = std::thread([&, refresh, note, a = session_id(), part = std::move(part), meta = std::move(meta)]() mutable {
+            for (const Node& n : part.nodes)  // titles we already have on disk: no new fetches
+                if (auto hit = cache.load(n.url); hit && !hit->body.empty())
+                    if (std::string t = html_title(hit->body); !t.empty()) meta.page_titles[n.url] = t;
+            const std::string json = bridges_json(part, meta);
             HttpOptions opt;
             opt.timeout_ms = 20000;  // the gateway waits up to 15 s for BRIDGES
             HttpClient http(opt);

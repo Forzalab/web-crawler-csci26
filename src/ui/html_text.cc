@@ -261,4 +261,15 @@ std::vector<std::string> html_to_lines(const std::string& html) {
     return o.lines;
 }
 
+std::string html_title(const std::string& html) {
+    size_t a = ifind(html, "<title", 0);
+    size_t gt = a == std::string::npos ? a : html.find('>', a);
+    size_t b = gt == std::string::npos ? gt : ifind(html, "</title", gt);
+    if (b == std::string::npos) return "";
+    std::string t;
+    for (const std::string& ln : html_to_lines(html.substr(gt + 1, b - gt - 1)))  // entities, whitespace
+        t += (t.empty() ? "" : " ") + ln;
+    return t;
+}
+
 }  // namespace wc
