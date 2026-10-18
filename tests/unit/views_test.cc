@@ -1,8 +1,10 @@
 // views_test.cc - headless renders of src/ui/views (state in, Element out).
 // Run: NO_COLOR=1 build/wc_views_test   (exit 1 if any check fails)
 // WC_VIEWS_DUMP=1 also prints a 100x30 main screen for eyeballing.
+// WC_VIEWS_BENCH=1 also times graph frames on a ~1000-node / 11k-edge graph (no asserts).
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -12,6 +14,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
+#include "ui/camera.h"
 #include "ui/matrix.h"
 #include "ui/theme.h"
 #include "ui/views.h"
@@ -551,6 +554,39 @@ static void dump_main() {
     std::cout << render(main, 100, 30) << "\n";
 }
 
+// ms per graph frame at 200x60 on a 10-ary tree of 1000 nodes + 10k SEEN cross-links.
+static void bench() {
+    CrawlGraph g;
+    auto u = [](int i) { return "https://s" + std::to_string(i % 13) + ".test/p" + std::to_string(i); };
+    g.add_node(u(0), 0);
+    for (int i = 1; i < 1000; ++i) {
+        g.add_node(u(i), g.nodes[size_t((i - 1) / 10)].depth + 1);
+        g.add_edge(u((i - 1) / 10), u(i), false);
+    }
+    uint32_t x = 12345;
+    while (g.edges.size() < 999 + 10000) {
+        x = x * 1664525u + 1013904223u;
+        int a = int((x >> 8) % 1000), b = int((x >> 20) % 1000);
+        if (!g.has_edge(u(a), u(b))) g.add_edge(u(a), u(b), true);
+    }
+    for (int i = 0; i < 1000; ++i) g.record_fetch(u(i), true);
+    Layout l = radial_layout(g);
+    const int w = 200, h = 60, frames = 50;
+    using Ms = std::chrono::duration<double, std::milli>;
+    auto t0 = std::chrono::steady_clock::now();
+    ReplayFrame f;
+    for (int i = 0; i < frames; ++i) f = replay_at(g, 1000000);
+    double replay = Ms(std::chrono::steady_clock::now() - t0).count() / frames;
+    std::cout << "bench: " << g.nodes.size() << " nodes, " << g.edges.size() << " edges, " << w << "x" << h << "\n";
+    std::cout << "  replay_at       " << replay << " ms/frame\n";
+    for (double zoom : {1.0, 4.0}) {
+        View v = apply(Camera{zoom, 0, 0}, fit(l, w * 2, (h - 5) * 4), w * 2, (h - 5) * 4);
+        t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < frames; ++i) render(views::graph(g, l, f, v), w, h - 5);
+        std::cout << "  graph zoom " << zoom << "    " << Ms(std::chrono::steady_clock::now() - t0).count() / frames << " ms/frame\n";
+    }
+}
+
 int main() {
     test_theme();
     test_graph();
@@ -569,6 +605,7 @@ int main() {
     test_coach();
     test_loading();
     if (std::getenv("WC_VIEWS_DUMP")) dump_main();
+    if (std::getenv("WC_VIEWS_BENCH")) bench();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << "\n";
     return failures ? 1 : 0;
 }
