@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
+#include <random>
 #include <sstream>
 
 namespace wc {
@@ -111,6 +113,14 @@ std::string complete(const std::string& line) {
 std::string bridges_view_url(const char* assignment, const char* user) {
     return std::string("http://assignments.bridgesuncc.org/assignments/") + (assignment && *assignment ? assignment : "<N>") +
            "/" + (user && *user ? user : "<user>");
+}
+
+static_assert(kAssignHi <= std::numeric_limits<int>::max(), "assignment id must fit int");
+
+std::string session_assignment(const char* env, std::uint32_t seed) {
+    if (env && *env) return env;
+    std::mt19937 rng(seed);
+    return std::to_string(std::uniform_int_distribution<int>(kAssignLo, kAssignHi)(rng));
 }
 
 std::string example_label(const CrawlGraph& g) {

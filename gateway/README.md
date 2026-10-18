@@ -15,7 +15,7 @@ body: GraphAdjacencyList JSON
 |---|---|---|
 | BRIDGES_USER, BRIDGES_KEY | none (required) | host secret store only |
 | BRIDGES_SERVER | http://assignments.bridgesuncc.org | |
-| ASSIGNMENT_MIN / ASSIGNMENT_MAX | 1 / 99 | lock to the course range |
+| ASSIGNMENT_MIN / ASSIGNMENT_MAX | 1 / 99999999 | 8 digits (BRIDGES takes big ids, e.g. 69696969); lock to the course range if you like |
 | MAX_BYTES / MAX_NODES | 4 MB / 1000 | open endpoint guard |
 | GATEWAY_TOKEN | unset | if set, callers must send `X-Gateway-Token` |
 | TIMEOUT_MS | 15000 | upstream timeout |
@@ -26,7 +26,10 @@ PORT=8080 BRIDGES_USER=... BRIDGES_KEY=... npm start     # local / Cloud Run
 ./build/wc --pipe --bridges < tests/crawl/inputfile9 | curl -s --data-binary @- 'localhost:8080/?assignment=26'
 ```
 
-The TUI posts here on `/bridges` (`WC_GATEWAY_URL=<this endpoint>`, `BRIDGES_ASSIGNMENT=N`, optional `WC_BRIDGES_SUB`, `WC_GATEWAY_TOKEN`).
+The TUI posts here on `/bridges` (`WC_GATEWAY_URL=<this endpoint>`, optional `WC_BRIDGES_SUB`, `WC_GATEWAY_TOKEN`).
+Assignment: a random 7-digit id picked once per TUI session (every upload and the `/resume` re-upload reuse it, so one link updates in place); `BRIDGES_ASSIGNMENT=N` overrides it.
 
 Files: `gateway.js` (all logic, host-independent) · `server.js` (node:http, Cloud Run/local) · `api/bridges.js` (Vercel).
-Not deployed. Deploy waits for Tony's host creds.
+Deployed: `https://wc-bridges-gateway.vercel.app/api/bridges` (Vercel project `wc-bridges-gateway`, team `forzalabs-projects`, root dir `gateway/`, no build; production domain public, previews behind Vercel Authentication).
+Secrets BRIDGES_USER, BRIDGES_KEY, GATEWAY_TOKEN live only in Vercel → wc-bridges-gateway → Settings → Environment Variables (Production, Sensitive). Changing one needs a redeploy (Deployments → latest Production → ⋯ → Redeploy).
+Without them the endpoint answers 500 `gateway has no BRIDGES credentials`.

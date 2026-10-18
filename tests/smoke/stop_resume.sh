@@ -4,8 +4,9 @@
 #   127.0.0.1 (WC_GATEWAY_URL) that logs every upload:
 #     stop:  Esc on the loading screen -> graph screen within 2 s with PAGES n/1000, n < 1000
 #            -> /resume -> PAGES 1000/1000 -> Esc x5 exits 0; never /bridges -> 0 uploads
-#     share: stop -> /bridges (1 upload, n nodes) -> /resume -> "BRIDGES updated" (2nd upload,
-#            same assignment + sub, 1000 nodes)
+#     share: BRIDGES_ASSIGNMENT unset: stop -> /bridges (1 upload, n nodes, random 7-digit
+#            assignment shown in the link) -> /resume -> "BRIDGES updated" (2nd upload, same
+#            assignment + sub, 1000 nodes)
 #     ctrlc: Ctrl-C on the loading screen -> exits, alt screen off (terminal restored)
 # Exit 1 on any FAIL. Env: BIN=build/wc  OUT=build/smoke/stop_resume  DELAY_MS=400
 set -u
@@ -20,7 +21,8 @@ rm -rf "$OUT" && mkdir -p "$OUT" && OUT=$(cd "$OUT" && pwd)
 python3 tests/smoke/gen_fixtures.py "$root/build/smoke/fixtures" > /dev/null || exit 2
 
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
-# Fake gateway: every POST -> one line "<path?query> <nodes>" in $OUT/<session>.posts, 200 + a BRIDGES url.
+# Fake gateway: every POST -> one line "<path?query> <nodes>" in $OUT/<session>.posts, 200 + a BRIDGES url
+# for the posted assignment (like the real gateway).
 python3 -c '
 import http.server, json, sys
 class H(http.server.BaseHTTPRequestHandler):
@@ -29,7 +31,8 @@ class H(http.server.BaseHTTPRequestHandler):
         sess = self.path.split("sess=")[1].split("&")[0]
         with open(sys.argv[1] + "/" + sess + ".posts", "a") as f:
             f.write(self.path + " " + str(len(json.loads(body)["nodes"])) + "\n")
-        out = json.dumps({"ok": True, "url": "http://assignments.bridgesuncc.org/assignments/26/tony"}).encode()
+        assn = self.path.split("assignment=")[1].split("&")[0]
+        out = json.dumps({"ok": True, "url": "http://assignments.bridgesuncc.org/assignments/" + assn + "/tony"}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
     def log_message(self, *a): pass
 s = http.server.HTTPServer(("127.0.0.1", 0), H)
@@ -55,11 +58,11 @@ waitfor() {  # waitfor <sess> <regex> <seconds>
     return 1
 }
 pages() { cap "$1" | head -n 1 | grep -oE 'PAGES [0-9]+/[0-9]+'; }
-start() {  # start <sess>: through the prompts, crawl begins (depth 3, 1000 pages)
+start() {  # start <sess> [assignment]: through the prompts, crawl begins (depth 3, 1000 pages)
     mkdir -p "$OUT/$1/home"
     T new-session -d -s "$1" -x 120 -y 40 -c "$root" \
-        env HOME="$OUT/$1/home" WC_FIXTURE="$root/build/smoke/fixtures/tree1111.txt" WC_FIXTURE_DELAY_MS="$DELAY_MS" \
-        WC_GATEWAY_URL="$gw$1" BRIDGES_ASSIGNMENT=26 WC_BRIDGES_SUB=3 \
+        env -u BRIDGES_ASSIGNMENT HOME="$OUT/$1/home" WC_FIXTURE="$root/build/smoke/fixtures/tree1111.txt" WC_FIXTURE_DELAY_MS="$DELAY_MS" \
+        WC_GATEWAY_URL="$gw$1" ${2:+BRIDGES_ASSIGNMENT=$2} WC_BRIDGES_SUB=3 \
         bash -c '"$0" 2> "$1"; echo $? > "$2"' "$root/$BIN" "$OUT/$1/stderr.txt" "$OUT/$1/exit.txt"
     waitfor "$1" 'Paste a URL' 10 || return 1
     T send-keys -t "$1" -l -- "https://tree.example/"; T send-keys -t "$1" Enter; waitfor "$1" 'Visualize' 5
@@ -78,8 +81,9 @@ echo "stop / resume smoke ($BIN, ${DELAY_MS} ms per fetch)"
 
 # stop -> graph [-> /bridges] -> /resume -> full graph [-> re-upload] -> quit
 stop_resume() {  # stop_resume <sess> <share: 0|1>
-    local s=$1 share=$2 bad="" prev="" cur="" n rc
-    start $s || bad="loading screen never shown"
+    local s=$1 share=$2 bad="" prev="" cur="" n rc assn=""
+    local fixed=26; [ "$share" = 1 ] && fixed=""  # share: no BRIDGES_ASSIGNMENT -> random id per session
+    start $s $fixed || bad="loading screen never shown"
     if [ -z "$bad" ]; then
         sleep 1
         T send-keys -t $s Escape
@@ -100,8 +104,12 @@ stop_resume() {  # stop_resume <sess> <share: 0|1>
     fi
     if [ -z "$bad" ] && [ "$share" = 1 ]; then
         T send-keys -t $s -l "/bridges"; T send-keys -t $s Enter
-        waitfor $s 'assignments/26/tony' 5 || bad="no BRIDGES link after /bridges"
-        grep -q "assignment=26&sub=3 $n\$" "$OUT/$s.posts" 2> /dev/null || bad="${bad:-upload: $(cat "$OUT/$s.posts" 2> /dev/null) (want 1 POST, assignment=26&sub=3, $n nodes)}"
+        for _ in $(seq 1 50); do [ "$(posts $s)" != 0 ] && break; sleep 0.1; done
+        assn=$(grep -oE 'assignment=[0-9]+' "$OUT/$s.posts" 2> /dev/null | head -n 1 | cut -d= -f2)
+        { [ -n "$assn" ] && [ "$assn" -ge 1000000 ] && [ "$assn" -le 9999999 ]; } || bad="random assignment '$assn' not in 1000000..9999999"
+        echo "      $s random assignment: $assn"
+        [ -z "$bad" ] && { waitfor $s "assignments/$assn/tony" 5 || bad="no BRIDGES link with assignment $assn after /bridges"; }
+        [ -z "$bad" ] && { grep -q "assignment=$assn&sub=3 $n\$" "$OUT/$s.posts" 2> /dev/null || bad="upload: $(cat "$OUT/$s.posts" 2> /dev/null) (want 1 POST, assignment=$assn&sub=3, $n nodes)"; }
         T send-keys -t $s Escape; sleep 0.3
     fi
     if [ -z "$bad" ]; then
@@ -111,7 +119,7 @@ stop_resume() {  # stop_resume <sess> <share: 0|1>
     fi
     if [ -z "$bad" ] && [ "$share" = 1 ]; then
         waitfor $s 'BRIDGES updated' 5 || bad="no 'BRIDGES updated' toast"
-        [ "$(posts $s)" = 2 ] && tail -n 1 "$OUT/$s.posts" | grep -q "assignment=26&sub=3 1000$" ||
+        [ "$(posts $s)" = 2 ] && tail -n 1 "$OUT/$s.posts" | grep -q "assignment=$assn&sub=3 1000$" ||
             bad="${bad:-re-upload: $(tr '\n' ';' < "$OUT/$s.posts") (want a 2nd POST, same assignment+sub, 1000 nodes)}"
     fi
     [ -z "$bad" ] && [ "$share" = 0 ] && [ "$(posts $s)" != 0 ] && bad="uploaded without /bridges"

@@ -131,6 +131,18 @@ static void test_yes_no() {
 static void test_bridges_url_example() {
     CHECK_EQ(bridges_view_url("7", "tony"), std::string("http://assignments.bridgesuncc.org/assignments/7/tony"));
     CHECK_EQ(bridges_view_url(nullptr, ""), std::string("http://assignments.bridgesuncc.org/assignments/<N>/<user>"));
+    CHECK_EQ(session_assignment("69696969", 1), std::string("69696969"));  // env wins
+    CHECK_EQ(session_assignment(nullptr, 42), session_assignment("", 42));  // empty env = unset, same seed = same id
+    bool spread = false;
+    std::string first = session_assignment(nullptr, 0);
+    for (std::uint32_t i = 0; i < 1000; ++i) {
+        std::string id = session_assignment(i % 2 ? "" : nullptr, i * 2654435761u);  // unset or empty env -> random
+        CHECK_EQ(id.size(), size_t(7));
+        int n = std::stoi(id);
+        CHECK_EQ(n >= kAssignLo && n <= kAssignHi, true);
+        spread = spread || id != first;
+    }
+    CHECK_EQ(spread, true);
     CrawlGraph g;
     CHECK_EQ(example_label(g), std::string("google.com"));
     g.nodes.push_back({"https://example.com/", 0});

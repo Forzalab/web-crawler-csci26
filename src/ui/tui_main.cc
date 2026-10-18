@@ -7,9 +7,10 @@
 // Enter on a result opens its page preview (cache, else live fetch).
 // Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
 // and shows the graph so far; /resume crawls on into the same graph.
-// /bridges uploads the graph through gateway/ when WC_GATEWAY_URL is set (BRIDGES_ASSIGNMENT,
-// WC_BRIDGES_SUB = 0, WC_GATEWAY_TOKEN optional); once uploaded, a finished /resume re-uploads
-// to the same assignment + sub, so the same link shows the bigger graph.
+// /bridges uploads the graph through gateway/ when WC_GATEWAY_URL is set (WC_BRIDGES_SUB = 0,
+// WC_GATEWAY_TOKEN optional). Assignment: BRIDGES_ASSIGNMENT, else a random 7-digit id picked
+// once per session. Once uploaded, a finished /resume re-uploads to the same assignment + sub,
+// so the same link shows the bigger graph.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -18,6 +19,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <thread>
 
 #include <ftxui/component/animation.hpp>
@@ -84,9 +86,11 @@ std::string seen_path() {
     return std::string(home ? home : ".") + "/.wc_tui_seen";
 }
 
-std::string bridges_url() {
+// assignment: the session's id ("" = BRIDGES_ASSIGNMENT, else "<N>").
+std::string bridges_url(const std::string& assignment) {
     if (const char* u = std::getenv("WC_BRIDGES_URL")) return u;
-    return bridges_view_url(std::getenv("BRIDGES_ASSIGNMENT"), std::getenv("BRIDGES_USERNAME"));
+    return bridges_view_url(assignment.empty() ? std::getenv("BRIDGES_ASSIGNMENT") : assignment.c_str(),
+                            std::getenv("BRIDGES_USERNAME"));
 }
 
 // Centered prompt column: question, the live input, a dim footer.
@@ -212,6 +216,7 @@ int tui_main(int argc, char** argv) {
     // BRIDGES upload: one thread at a time; shared = uploaded once this session.
     const char* gateway = std::getenv("WC_GATEWAY_URL");
     std::string share_url;  // the gateway's answer; "" = the env-built link (bridges_url)
+    std::string assignment;  // picked once (BRIDGES_ASSIGNMENT, else random 7 digits), every upload reuses it
     bool shared = false;
     std::thread up_worker;
     std::atomic<bool> up_busy{false};
@@ -230,20 +235,26 @@ int tui_main(int argc, char** argv) {
         hits = q.verb.empty() && !idle ? match(g, q) : std::vector<int>{};  // empty query: ghost only
         selected = std::clamp(selected, 0, std::max(0, int(hits.size()) - 1));
     };
-    auto view_url = [&] { return share_url.empty() ? bridges_url() : share_url; };
+    auto session_id = [&]() -> const std::string& {
+        if (assignment.empty()) assignment = session_assignment(std::getenv("BRIDGES_ASSIGNMENT"), std::random_device{}());
+        return assignment;
+    };
+    // Before the first upload the fallback link shows the id that upload will use, never "<N>".
+    auto view_url = [&] {
+        return !share_url.empty() ? share_url : bridges_url(gateway && *gateway ? session_id() : "");
+    };
     // refresh = re-upload after a /resume: quiet until it lands.
     auto upload = [&](bool refresh) {
         if (up_busy) return toast("still uploading…");
         if (up_worker.joinable()) up_worker.join();
         up_busy = true;
         if (!refresh) toast("uploading to BRIDGES…");
-        up_worker = std::thread([&, refresh, json = bridges_json(g)] {
+        up_worker = std::thread([&, refresh, a = session_id(), json = bridges_json(g)] {
             HttpOptions opt;
             opt.timeout_ms = 20000;  // the gateway waits up to 15 s for BRIDGES
             HttpClient http(opt);
-            const char *a = std::getenv("BRIDGES_ASSIGNMENT"), *sub = std::getenv("WC_BRIDGES_SUB"),
-                       *tok = std::getenv("WC_GATEWAY_TOKEN");
-            GatewayReply r = gateway_upload(http, gateway, a ? a : "", sub ? std::atoi(sub) : 0, json, tok ? tok : "");
+            const char *sub = std::getenv("WC_BRIDGES_SUB"), *tok = std::getenv("WC_GATEWAY_TOKEN");
+            GatewayReply r = gateway_upload(http, gateway, a, sub ? std::atoi(sub) : 0, json, tok ? tok : "");
             screen.Post([&, refresh, r] {
                 if (!r.error.empty()) return toast("BRIDGES: " + r.error);
                 share_url = r.url;

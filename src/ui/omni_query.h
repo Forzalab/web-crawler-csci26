@@ -6,6 +6,7 @@
 //   /bridges /resume /help /quit   verbs (first token starts with '/')
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,6 +35,12 @@ std::string complete(const std::string& line);
 // Where a BRIDGES graph is viewed: <server>/assignments/<N>/<user>. Null/empty
 // assignment or user -> the literal "<N>" / "<user>". Never touches API keys.
 std::string bridges_view_url(const char* assignment, const char* user);
+
+// The BRIDGES assignment for one TUI session: env (BRIDGES_ASSIGNMENT) when set, else a random
+// 7-digit id, uniform in [kAssignLo, kAssignHi], drawn from a generator seeded with seed (the TUI
+// passes std::random_device). The TUI picks it once and reuses it for every upload.
+inline constexpr int kAssignLo = 1000000, kAssignHi = 9999999;
+std::string session_assignment(const char* env, std::uint32_t seed);
 
 // A real page from the graph to show as the omnibar example: a depth-1 node's
 // short label, else the start page, else "google.com" (empty graph).
