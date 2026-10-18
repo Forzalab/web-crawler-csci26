@@ -2,6 +2,7 @@
 // Run: NO_COLOR=1 build/wc_views_test   (exit 1 if any check fails)
 // WC_VIEWS_DUMP=1 also prints a 100x30 main screen for eyeballing.
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -90,6 +91,27 @@ static void test_theme() {
     CHECK(theme::depth_color(0) == theme::kText, "");
 }
 
+// True if label text touches an edge dot or a glyph: a run of 2+ label chars right next
+// to a braille cell or a ◆ (the smoke stick-grep, in C++).
+static bool sticks(const std::string& out) {
+    std::vector<char32_t> cps;
+    for (size_t i = 0; i < out.size();) {
+        unsigned char b = out[i];
+        int n = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+        char32_t cp = n == 1 ? b : b & (0x7F >> n);
+        for (int k = 1; k < n && i + k < out.size(); ++k) cp = (cp << 6) | (out[i + k] & 0x3F);
+        cps.push_back(cp);
+        i += n;
+    }
+    auto word = [](char32_t c) { return (c < 128 && std::isalnum(int(c))) || c == '/' || c == '.' || c == '_' || c == '-'; };
+    auto dot = [](char32_t c) { return (c >= 0x2800 && c <= 0x28FF) || c == 0x25C6; };
+    for (size_t i = 0; i + 2 < cps.size(); ++i) {
+        if (dot(cps[i]) && word(cps[i + 1]) && word(cps[i + 2])) return true;
+        if (word(cps[i]) && word(cps[i + 1]) && dot(cps[i + 2])) return true;
+    }
+    return false;
+}
+
 static void test_graph() {
     Fake k = fake_graph();
     View v{30, 80, 30};  // canvas 160x96 sub-pixels at 80x24
@@ -101,6 +123,7 @@ static void test_graph() {
     CHECK_LACKS(out, "deep.test");
     CHECK_HAS(out, "·");
     CHECK_LACKS(out, "www.");
+    CHECK(!sticks(out), out);
 
     k.f.node_t = {1, 0, 0, 0, 0};  // only root shown, edges not started
     k.f.edge_t = {0, 0, 0, 0, 0};
@@ -143,6 +166,62 @@ static void test_graph_same_site() {
     size_t p = under.find("iana.org"), cols = 0;
     for (size_t i = 0; i < p; ++i) cols += (static_cast<unsigned char>(under[i]) & 0xC0) != 0x80;
     CHECK(cols == 36, out);
+    CHECK(!sticks(out), out);
+}
+
+// A label is padded with a blank cell on each side: an edge running under it never
+// touches the text, it stops one cell short.
+static void test_label_pad() {
+    Fake k;
+    k.g.add_node("https://www.iana.org/", 0);
+    k.g.add_node("https://www.iana.org/domains", 1);
+    k.g.add_node("https://far.test/x", 2);
+    k.g.add_edge(k.g.nodes[0].url, k.g.nodes[1].url, false);
+    k.g.add_edge(k.g.nodes[0].url, k.g.nodes[2].url, false);
+    k.g.add_edge(k.g.nodes[2].url, k.g.nodes[0].url, true);
+    k.l.pos = {{-3, 0}, {-1, 0}, {3, 0}};  // root -> far runs straight through /domains' row
+    k.l.parent = {-1, 0, 0};
+    k.f.node_t = {1, 1, 1};
+    k.f.edge_t = {1, 1, 1};
+    k.f.done = true;
+    std::string out = render(views::graph(k.g, k.l, k.f, View{10, 80, 48}));
+    std::string row = line_of(out, 12);
+    CHECK(row.find(" /domains ") != std::string::npos, out);
+    CHECK(row.find("· /domains ⠁") != std::string::npos, out);  // glyph, pad, label, pad, then the edge
+    CHECK(!sticks(out), out);
+}
+
+// Non-root labels keep rows +-1 clear of other labels; the root's label is exempt.
+static void test_label_halo() {
+    Fake k;
+    k.g.add_node("https://r.test/", 0);
+    k.g.add_node("https://r.test/aaa", 1);
+    k.g.add_node("https://r.test/bbb", 1);  // one row under /aaa, same column: no label
+    k.g.add_node("https://r.test/ccc", 1);  // two rows under /aaa: label kept
+    for (int i = 1; i < 4; ++i) k.g.add_edge(k.g.nodes[0].url, k.g.nodes[i].url, false);
+    k.l.pos = {{0, 0}, {2, -0.4}, {2, 0}, {2, 0.4}};  // scale 10: rows 11, 12, 13 -> /bbb sits between
+    k.l.parent = {-1, 0, 0, 0};
+    k.f.node_t = {1, 1, 1, 1};
+    k.f.edge_t = {1, 1, 1};
+    k.f.done = true;
+    std::string out = render(views::graph(k.g, k.l, k.f, View{10, 40, 48}));
+    CHECK_HAS(out, "/aaa");
+    CHECK_LACKS(out, "/bbb");
+    CHECK_HAS(out, "/ccc");
+    CHECK(!sticks(out), out);
+    // Root label right under the root glyph, a depth-1 label one row below it: both shown.
+    Fake r;
+    r.g.add_node("https://r.test/", 0);
+    r.g.add_node("https://r.test/ddd", 1);
+    r.g.add_edge(r.g.nodes[0].url, r.g.nodes[1].url, false);
+    r.l.pos = {{0, 0}, {-0.6, 0.8}};  // root glyph row 12, its label row 13, /ddd row 14
+    r.l.parent = {-1, 0};
+    r.f.node_t = {1, 1};
+    r.f.edge_t = {1};
+    r.f.done = true;
+    out = render(views::graph(r.g, r.l, r.f, View{10, 80, 48}));
+    CHECK_HAS(line_of(out, 13), "r.test");
+    CHECK_HAS(line_of(out, 14), "/ddd");
 }
 
 // Cross-link (seen) edges: drawn up to 40 nodes, skipped beyond.
@@ -292,8 +371,8 @@ static void test_field_align() {
 }
 
 static void test_toast_too_small() {
-    std::string out = render(views::toast("Copied 12 URLs"), 30, 3);
-    CHECK_HAS(out, "✓ Copied 12 URLs");
+    std::string out = render(views::toast("Copied 12 URLs"), 20, 3);  // exactly its width
+    CHECK_HAS(out, "│ ✓ Copied 12 URLs │");
     CHECK_HAS(out, "╭");
     out = render(views::too_small(60, 20));
     CHECK_HAS(out, "Enlarge terminal to 80×24 (now 60×20)");
@@ -476,6 +555,8 @@ int main() {
     test_theme();
     test_graph();
     test_graph_same_site();
+    test_label_pad();
+    test_label_halo();
     test_seen_edges_cap();
     test_boss_bar();
     test_omnibar();

@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <set>
 #include <utility>
 
 #include <ftxui/dom/canvas.hpp>
@@ -114,16 +113,33 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
         // id order (shallow first); one that would overlap a glyph or an
         // earlier label is skipped, its own glyph still drawn.
         const std::string root_url = g.nodes.empty() ? "" : g.nodes[0].url;
-        std::set<std::pair<int, int>> taken;  // (col, row) cells under labels
+        // One byte per cell: what sits there. Off-canvas cells count as free (clipped anyway).
+        enum : char { kFree, kHalo, kSolid, kLabel };  // kSolid = glyph or root label
+        const int gw = c.width() / 2, gh = c.height() / 4;
+        std::vector<char> grid(size_t(gw) * size_t(gh), kFree);
+        auto at = [&](int col, int row) -> char {
+            return col >= 0 && row >= 0 && col < gw && row < gh ? grid[size_t(row) * gw + col] : char(kFree);
+        };
+        auto mark = [&](int col, int row, char v) {
+            if (col >= 0 && row >= 0 && col < gw && row < gh) grid[size_t(row) * gw + col] = std::max(grid[size_t(row) * gw + col], v);
+        };
         auto cols = [](const std::string& s) {
             int n = 0;
             for (unsigned char ch : s) n += (ch & 0xC0) != 0x80;
             return n;
         };
-        auto claim = [&](int col, int row, int w) {
-            for (int i = 0; i < w; ++i)
-                if (taken.count({col + i, row})) return false;
-            for (int i = 0; i < w; ++i) taken.insert({col + i, row});
+        // A label of w cols at `col` needs [col-1, col+w] free: the two pads are drawn as
+        // spaces, wiping any edge dots, so text never touches a dot or glyph. A halo label
+        // also needs no other label on rows +-1 and keeps them for itself.
+        auto place = [&](int col, int row, int w, bool halo) {
+            for (int i = col - 1; i <= col + w; ++i) {
+                if (at(i, row) != kFree) return false;
+                if (halo && (at(i, row - 1) == kLabel || at(i, row + 1) == kLabel)) return false;
+            }
+            for (int i = col - 1; i <= col + w; ++i) {
+                mark(i, row, halo ? kLabel : kSolid);
+                if (halo) mark(i, row - 1, kHalo), mark(i, row + 1, kHalo);
+            }
             return true;
         };
         auto drawn = [&](size_t id) { return shown(int(id)) && f.node_t[id] >= 1.0f; };
@@ -141,7 +157,7 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
                 p.foreground_color = col;
                 p.bold = root;
             });
-            taken.insert({x / 2, y / 4});
+            mark(x / 2, y / 4, kSolid);
         }
         // Pass 2: labels, root + depth 1 only, in id order.
         for (size_t id = 0; id < g.nodes.size(); ++id) {
@@ -154,12 +170,9 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
                 p.foreground_color = th::kText;
                 p.bold = root;
             };
-            if (root) {  // centred under the glyph
-                int cx = std::max(0, x / 2 - w / 2);
-                if (claim(cx, y / 4 + 1, w)) c.DrawText(cx * 2, y + 4, lab, white);
-            } else if (claim(x / 2 + 1, y / 4, w + 1)) {
-                c.DrawText(x + 2, y, " " + lab, white);  // space clears edge dots
-            }
+            // Root: centred under the glyph, no halo. Others: one col right of the glyph.
+            int col = root ? std::max(0, x / 2 - w / 2) : x / 2 + 2, row = y / 4 + (root ? 1 : 0);
+            if (place(col, row, w, !root)) c.DrawText((col - 1) * 2, row * 4, " " + lab + " ", white);
         }
     });
     if (l.sites.size() < 2) return cv;
@@ -225,7 +238,7 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
 }
 
 Element toast(const std::string& t) {
-    return hbox({text("✓ ") | bold | color(th::kAccent), text(t) | color(th::kText)}) |
+    return hbox({text(" ✓ ") | bold | color(th::kAccent), text(t + " ") | color(th::kText)}) |
            borderStyled(ROUNDED, th::kChrome) | clear_under;  // opaque over the graph
 }
 

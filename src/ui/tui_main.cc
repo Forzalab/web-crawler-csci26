@@ -568,7 +568,7 @@ int tui_main(int argc, char** argv) {
         if (bridges_shown && e == Event::Character('c')) {
             std::cout << osc52(view_url());
             std::cout.flush();
-            toast("copy sent ✓");
+            toast("copy sent");
             bridges_shown = false;
             set_omni("");
             refresh_hits();
