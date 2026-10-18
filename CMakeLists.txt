@@ -27,6 +27,7 @@ add_library(wc_core STATIC
   src/core/sleeper.cc
   src/core/crawl.cc          # Tony's #2
   src/core/crawl_parallel.cc # TUI: parallel BFS + resume (same graph as crawl_bfs)
+  src/core/tree.cc           # spanning tree: layout, LOD, BRIDGES subset
   src/mocks/mock_fetcher.cc
   src/mocks/mock_renderer.cc
   src/bridges/bridges_json.cc # BRIDGES JSON (no post)
@@ -63,6 +64,7 @@ endif()
 add_library(wc_ui_logic STATIC
   src/ui/layout.cc
   src/ui/replay.cc
+  src/ui/scene.cc
   src/ui/omni_query.cc
   src/ui/osc52.cc
   src/ui/camera.cc

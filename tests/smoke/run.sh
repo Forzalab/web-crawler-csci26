@@ -78,8 +78,8 @@ answer() {  # answer <key> <next-screen-regex>: yes/no prompts take the key at o
     T send-keys -t "$sess" -l -- "$1"
     if [ "$small" = 1 ]; then sleep 0.4; else wait_for "$2" 5 || true; fi
 }
-pages_of() {  # "PAGES 30/30 LIMIT" from the boss bar (row 1), meter glyphs dropped
-    head -n 1 <<< "$1" | grep -oE 'DEPTH [0-9]+/[0-9]+|PAGES [0-9]+/[0-9]+|LIMIT' | paste -sd' ' -
+links_of() {  # "LINKS 30/30 LIMIT" from the boss bar (row 1), meter glyphs dropped
+    head -n 1 <<< "$1" | grep -oE 'DEPTH [0-9]+/[0-9]+|LINKS [0-9]+/[0-9]+|LIMIT' | paste -sd' ' -
 }
 layout_check() {  # layout_check <frame text> <small>: "" = ok, else what is wrong
     local f=$1
@@ -89,7 +89,7 @@ layout_check() {  # layout_check <frame text> <small>: "" = ok, else what is wro
         return
     fi
     head -n 1 <<< "$f" | grep -q 'DEPTH' || { echo "row 1 has no DEPTH meter"; return; }
-    head -n 1 <<< "$f" | grep -q 'PAGES' || { echo "row 1 has no PAGES meter"; return; }
+    head -n 1 <<< "$f" | grep -q 'LINKS' || { echo "row 1 has no LINKS meter"; return; }
     [ "$(grep -c 'DEPTH' <<< "$f")" -le 1 ] || echo "boss bar drawn twice"
 }
 
@@ -122,7 +122,7 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
         T send-keys -t "$sess" -l -- "$url"
         step "" 'Visualize'
         answer "y" 'Max depth'
-        step "$depth" 'Max pages'
+        step "$depth" 'Max links'
         step "$size" 'crawling|DEPTH'
         t_crawl=$(now)
         sleep 0.5
@@ -153,7 +153,7 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
         if [ -z "$verdict" ] && ! dead; then
             final=$(cap)
             frame "final"
-            detail=$(pages_of "$final")
+            detail=$(links_of "$final")
             bad=$(layout_check "$final" "$small")
             if [ -z "$bad" ] && [ "$small" = 1 ]; then  # grow to 120x40: the graph must appear
                 T resize-window -t "$sess" -x 120 -y 40
@@ -161,7 +161,7 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
                 frame "resized to 120x40"
                 bad=$(layout_check "$(cap)" 0)
                 [ -n "$bad" ] && bad="after resize: $bad"
-                detail=$(pages_of "$(cap)")
+                detail=$(links_of "$(cap)")
             fi
             [ -n "$bad" ] && verdict=ERR detail="layout: $bad"
             for _ in 1 2 3 4 5; do  # Esc peels omnibar / coach / preview, then quits

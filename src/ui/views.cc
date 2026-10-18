@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <set>
 #include <utility>
 
 #include <ftxui/dom/canvas.hpp>
@@ -20,14 +19,33 @@ namespace th = wc::theme;
 
 namespace {
 
-// Dotted line: every other sub-pixel along the major axis.
-void dotted(Canvas& c, int x1, int y1, int x2, int y2, const Color& col) {
-    int n = std::max(std::abs(x2 - x1), std::abs(y2 - y1));
-    for (int i = 0; i <= n; i += 2) {
-        double t = n ? double(i) / n : 0;
-        c.DrawPoint(int(std::lround(x1 + (x2 - x1) * t)), int(std::lround(y1 + (y2 - y1) * t)),
-                    true, col);
+// Dotted line: every `step`-th sub-pixel along the major axis, clipped to the
+// canvas first (Liang-Barsky), so an edge mostly off screen costs only its
+// visible dots. The first visible dot is rounded up to the step: the dots keep
+// their place along the line while it pans (no shimmer).
+// Returns false if no part of it is on the canvas.
+bool dotted(Canvas& c, int x1, int y1, int x2, int y2, const Color& col, int step) {
+    const int dx = x2 - x1, dy = y2 - y1, n = std::max(std::abs(dx), std::abs(dy));
+    double t0 = 0, t1 = 1;
+    const double p[] = {double(-dx), double(dx), double(-dy), double(dy)};
+    const double q[] = {double(x1), double(c.width() - 1 - x1), double(y1), double(c.height() - 1 - y1)};
+    for (int k = 0; k < 4; ++k) {
+        if (p[k] == 0) {
+            if (q[k] < 0) return false;  // parallel to this edge and outside it
+            continue;
+        }
+        double r = q[k] / p[k];
+        if (p[k] < 0) t0 = std::max(t0, r);
+        else t1 = std::min(t1, r);
     }
+    if (t0 > t1) return false;
+    if (n == 0) return c.DrawPoint(x1, y1, true, col), true;
+    int i0 = int(std::ceil(t0 * n / step)) * step, i1 = int(std::floor(t1 * n));
+    for (int i = i0; i <= i1; i += step) {
+        double t = double(i) / n;
+        c.DrawPoint(int(std::lround(x1 + dx * t)), int(std::lround(y1 + dy * t)), true, col);
+    }
+    return true;
 }
 
 // "DEPTH 2/3 ▰▰▰▱" - orange fill, dark-grey unfilled; LIMIT tag at max.
@@ -80,14 +98,28 @@ private:
 
 }  // namespace
 
-Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v) {
-    // Copies: the lambda runs at render time, after the caller's frame may be gone.
-    Element cv = canvas([g, l, f, v](Canvas& c) {
+Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom) {
+    const Layout& l = scene->lay;
+    // The lambda runs at render time, after the caller's frame may be gone: it shares
+    // the scene (no copy) and owns the frame.
+    Element cv = canvas([scene, f = std::move(f), v, zoom](Canvas& c) {
+        const CrawlGraph& g = scene->g;
+        const Layout& l = scene->lay;
+        const ReplayPlan& plan = scene->plan;
+        const int step = zoom < 0.6 ? 4 : 2;  // zoomed far out: sparser dots
         auto sx = [&](int id) { return l.pos[id].x * v.scale + v.ox; };
         auto sy = [&](int id) { return l.pos[id].y * v.scale + v.oy; };
+        // Zoomed out, cluster members (and their subtrees) fold into their cluster.
+        const bool fold = zoom < kClusterZoom;
         auto shown = [&](int id) {
-            return id >= 0 && id < int(l.pos.size()) && id < int(f.node_t.size());
+            return id >= 0 && id < int(l.pos.size()) && id < int(f.node_t.size()) &&
+                   !(fold && id < int(scene->cluster_of.size()) && scene->cluster_of[size_t(id)] >= 0);
         };
+        // Per cluster: how far its members have come in the replay (0 = not yet).
+        std::vector<float> cl_t(fold ? scene->clusters.size() : 0, 0.0f);
+        for (size_t k = 0; k < cl_t.size(); ++k)
+            for (int m : scene->clusters[k].members)
+                if (size_t(m) < f.node_t.size()) cl_t[k] = std::max(cl_t[k], f.node_t[size_t(m)]);
         // Faint dotted ring at radius 1 around the root.
         if (shown(0) && f.node_t[0] > 0) {
             int r = int(std::lround(v.scale));
@@ -97,33 +129,67 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
                             int(std::lround(sy(0) + r * std::sin(a))), true, th::kFaint);
             }
         }
-        // Edges next, so nodes and labels sit on top. Cross-links (seen) always
-        // drawn: the dense core is the look Tony wants (decision 2026-10-17).
-        for (size_t e = 0; e < g.edges.size() && e < f.edge_t.size(); ++e) {
+        // Edges next, so nodes and labels sit on top. Highways first (scene order):
+        // tree edges into big subtrees, then SEEN back-links by in-degree, until the
+        // budget is spent; edges to depth <= 1 always. Back-links show only once every
+        // visible tree edge fits (reverses the "dense core" decision of 2026-10-17).
+        // Folded and offscreen edges cost nothing.
+        auto edge = [&](double ax, double ay, double bx, double by, float t, const Color& col) {
+            return dotted(c, int(std::lround(ax)), int(std::lround(ay)), int(std::lround(ax + (bx - ax) * t)),
+                          int(std::lround(ay + (by - ay) * t)), col, step);
+        };
+        const int budget = lod_budget(c.width() / 2, c.height() / 4, zoom);
+        int spent = 0;
+        for (size_t i = 0; i < scene->order.size(); ++i) {
+            if (int(i) >= scene->n_always && spent >= budget) break;
+            const size_t e = size_t(scene->order[i]);
+            if (e >= f.edge_t.size()) continue;
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
-            if (t <= 0) continue;
-            int a = g.id_of(g.edges[e].from), b = g.id_of(g.edges[e].to);
-            if (!shown(a) || !shown(b)) continue;
-            int x1 = int(std::lround(sx(a))), y1 = int(std::lround(sy(a)));
-            int x2 = int(std::lround(sx(a) + (sx(b) - sx(a)) * t));
-            int y2 = int(std::lround(sy(a) + (sy(b) - sy(a)) * t));
+            int a = plan.from[e], b = plan.to[e];
+            if (t <= 0 || !shown(a) || !shown(b)) continue;
             Color col = g.edges[e].seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth));
-            dotted(c, x1, y1, x2, y2, col);
+            spent += edge(sx(a), sy(a), sx(b), sy(b), t, col);
         }
-        // Nodes: glyph (+ label for depth < 2), snapped to cells. Labels go in
+        // Folded clusters: one edge from the parent to the cluster's spot.
+        auto csx = [&](const Cluster& k) { return k.pos.x * v.scale + v.ox; };
+        auto csy = [&](const Cluster& k) { return k.pos.y * v.scale + v.oy; };
+        for (size_t k = 0; k < cl_t.size(); ++k) {
+            const Cluster& cl = scene->clusters[k];
+            if (cl_t[k] <= 0 || !shown(cl.parent)) continue;
+            int d = g.nodes[size_t(cl.members[0])].depth;
+            edge(sx(cl.parent), sy(cl.parent), csx(cl), csy(cl), cl_t[k], th::depth_color(std::max(1, d)));
+        }
+        // Nodes: glyph (+ label down to lod_label_depth), snapped to cells. Labels go in
         // id order (shallow first); one that would overlap a glyph or an
         // earlier label is skipped, its own glyph still drawn.
         const std::string root_url = g.nodes.empty() ? "" : g.nodes[0].url;
-        std::set<std::pair<int, int>> taken;  // (col, row) cells under labels
+        // One byte per cell: what sits there. Off-canvas cells count as free (clipped anyway).
+        enum : char { kFree, kHalo, kSolid, kLabel };  // kSolid = glyph or root label
+        const int gw = c.width() / 2, gh = c.height() / 4;
+        std::vector<char> grid(size_t(gw) * size_t(gh), kFree);
+        auto at = [&](int col, int row) -> char {
+            return col >= 0 && row >= 0 && col < gw && row < gh ? grid[size_t(row) * gw + col] : char(kFree);
+        };
+        auto mark = [&](int col, int row, char v) {
+            if (col >= 0 && row >= 0 && col < gw && row < gh) grid[size_t(row) * gw + col] = std::max(grid[size_t(row) * gw + col], v);
+        };
         auto cols = [](const std::string& s) {
             int n = 0;
             for (unsigned char ch : s) n += (ch & 0xC0) != 0x80;
             return n;
         };
-        auto claim = [&](int col, int row, int w) {
-            for (int i = 0; i < w; ++i)
-                if (taken.count({col + i, row})) return false;
-            for (int i = 0; i < w; ++i) taken.insert({col + i, row});
+        // A label of w cols at `col` needs [col-1, col+w] free: the two pads are drawn as
+        // spaces, wiping any edge dots, so text never touches a dot or glyph. A halo label
+        // also needs no other label on rows +-1 and keeps them for itself.
+        auto place = [&](int col, int row, int w, bool halo) {
+            for (int i = col - 1; i <= col + w; ++i) {
+                if (at(i, row) != kFree) return false;
+                if (halo && (at(i, row - 1) == kLabel || at(i, row + 1) == kLabel)) return false;
+            }
+            for (int i = col - 1; i <= col + w; ++i) {
+                mark(i, row, halo ? kLabel : kSolid);
+                if (halo) mark(i, row - 1, kHalo), mark(i, row + 1, kHalo);
+            }
             return true;
         };
         auto drawn = [&](size_t id) { return shown(int(id)) && f.node_t[id] >= 1.0f; };
@@ -141,25 +207,47 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
                 p.foreground_color = col;
                 p.bold = root;
             });
-            taken.insert({x / 2, y / 4});
+            mark(x / 2, y / 4, kSolid);
         }
-        // Pass 2: labels, root + depth 1 only, in id order.
+        // Landed folded clusters: bold glyph of the members' site, in their depth colour.
+        auto landed = [&](size_t k) { return cl_t[k] >= 1.0f && shown(scene->clusters[k].parent); };
+        for (size_t k = 0; k < cl_t.size(); ++k) {
+            if (!landed(k)) continue;
+            const Cluster& cl = scene->clusters[k];
+            int m = cl.members[0], x = int(std::lround(csx(cl))) / 2 * 2, y = int(std::lround(csy(cl))) / 4 * 4;
+            Color col = th::depth_color(g.nodes[size_t(m)].depth);
+            c.DrawText(x, y, th::glyph(size_t(m) < l.shape.size() ? l.shape[size_t(m)] : -1, Status::Fetched),
+                       [col](Cell& p) {
+                           p.foreground_color = col;
+                           p.bold = true;
+                       });
+            mark(x / 2, y / 4, kSolid);
+        }
+        auto white = [](bool bold) {
+            return [bold](Cell& p) {
+                p.foreground_color = th::kText;
+                p.bold = bold;
+            };
+        };
+        // Pass 2: labels in id order, root first, folded clusters right after it;
+        // deeper rings get labels as the camera zooms in (lod_label_depth).
+        const int label_depth = lod_label_depth(zoom);
         for (size_t id = 0; id < g.nodes.size(); ++id) {
-            if (!drawn(id) || g.nodes[id].depth > 1) continue;
+            if (id == 1)
+                for (size_t k = 0; k < cl_t.size(); ++k) {
+                    if (!landed(k)) continue;
+                    const Cluster& cl = scene->clusters[k];
+                    int col = int(std::lround(csx(cl))) / 2 + 2, row = int(std::lround(csy(cl))) / 4;
+                    if (place(col, row, cols(cl.label), true)) c.DrawText((col - 1) * 2, row * 4, " " + cl.label + " ", white(false));
+                }
+            if (!drawn(id) || g.nodes[id].depth > label_depth) continue;
             int x = cx_of(id), y = cy_of(id);
             bool root = id == 0;
             std::string lab = node_label(g.nodes[id].url, root_url);
             int w = cols(lab);
-            auto white = [root](Cell& p) {
-                p.foreground_color = th::kText;
-                p.bold = root;
-            };
-            if (root) {  // centred under the glyph
-                int cx = std::max(0, x / 2 - w / 2);
-                if (claim(cx, y / 4 + 1, w)) c.DrawText(cx * 2, y + 4, lab, white);
-            } else if (claim(x / 2 + 1, y / 4, w + 1)) {
-                c.DrawText(x + 2, y, " " + lab, white);  // space clears edge dots
-            }
+            // Root: centred under the glyph, no halo. Others: one col right of the glyph.
+            int col = root ? std::max(0, x / 2 - w / 2) : x / 2 + 2, row = y / 4 + (root ? 1 : 0);
+            if (place(col, row, w, !root)) c.DrawText((col - 1) * 2, row * 4, " " + lab + " ", white(root));
         }
     });
     if (l.sites.size() < 2) return cv;
@@ -172,23 +260,29 @@ Element graph(const CrawlGraph& g, const Layout& l, const ReplayFrame& f, View v
     return dbox({cv, vbox({filler(), hbox(std::move(legend))})});
 }
 
+Color focus_border(bool focused, float glow, float flash) {
+    if (!focused) return th::kFaint;
+    Color c = Color::Interpolate(std::clamp(glow, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+    return Color::Interpolate(std::clamp(flash, 0.0f, 1.0f), c, th::kText);
+}
+
 Element boss_bar(int depth, int max_depth, int size, int max_size, bool flash_depth,
-                 bool flash_size) {
+                 bool flash_size, Color rule) {
     return vbox({
         hbox({
             text(" "),
             meter("DEPTH", depth, max_depth, flash_depth),
             filler(),
-            meter("PAGES", size, max_size, flash_size),
+            meter("LINKS", size, max_size, flash_size),
             text(" "),
         }),
-        separatorLight() | color(th::kFaint),
+        separatorLight() | color(rule),
     });
 }
 
-Element input_box(Element input) {
+Element input_box(Element input, Color border) {
     // White on black incl. the border; NO_COLOR keeps border + plain text.
-    return std::move(input) | color(Color::White) | borderStyled(ROUNDED, th::kAccent) | bgcolor(Color::Black);
+    return std::move(input) | color(Color::White) | borderStyled(ROUNDED, border) | bgcolor(Color::Black);
 }
 
 Element input_text(Element input, bool placeholder) {
@@ -203,7 +297,7 @@ Element field(const std::string& label, Element input, int width) {
 }
 
 Element omnibar(Element input, const std::vector<std::string>& results, int selected,
-                const std::string& ghost) {
+                const std::string& ghost, Color border) {
     Elements rows;
     // Drop up: results[0] sits right above the input line.
     for (int i = int(results.size()) - 1; i >= 0; --i) {
@@ -219,13 +313,13 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
     Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input) | xflex_factor(0, 1), text(first) | color(th::kChrome), filler()})};
     for (size_t p = ghost.find('\n'); p != std::string::npos; p = ghost.find('\n', p + 1))
         box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome) | dim);
-    rows.push_back(input_box(vbox(std::move(box))));
+    rows.push_back(input_box(vbox(std::move(box)), border));
     // Centred column, <= 60 cols and <= half the screen; results share it.
     return std::make_shared<CenterCap>(vbox(std::move(rows)), 60);
 }
 
 Element toast(const std::string& t) {
-    return hbox({text("✓ ") | bold | color(th::kAccent), text(t) | color(th::kText)}) |
+    return hbox({text(" ✓ ") | bold | color(th::kAccent), text(t + " ") | color(th::kText)}) |
            borderStyled(ROUNDED, th::kChrome) | clear_under;  // opaque over the graph
 }
 
@@ -241,8 +335,7 @@ Element too_small(int w, int h) {
 }
 
 Element preview(const std::string& title, const std::vector<std::string>& lines, int scroll,
-                float glow, bool maximized) {
-    Color edge = Color::Interpolate(std::clamp(glow, 0.0f, 1.0f), th::kAccentDim, th::kAccent);
+                Color edge, bool maximized) {
     Elements body;
     for (size_t i = size_t(std::max(0, scroll)); i < lines.size(); ++i) {
         const std::string& ln = lines[i];
@@ -255,7 +348,7 @@ Element preview(const std::string& title, const std::vector<std::string>& lines,
     }
     Element content = vbox({
         vbox(std::move(body)) | flex,
-        text("j/k scroll · m max · Esc close") | dim | color(th::kChrome),
+        text("Tab focus · j/k scroll · m max · Esc close") | dim | color(th::kChrome),
     });
     // color() paints the border; every child above sets its own colour on top.
     Element panel = window(text(" PREVIEW · " + title + " ") | bold | color(th::kAccent),
@@ -290,7 +383,8 @@ Element loading(const LoadingState& s, Element background) {
     Elements rows = {
         hbox({text(" "), text(spin[s.tick % 10]) | color(th::kAccent), text(" " + s.line) | color(th::kText)}),
         text("   crawling " + s.host) | color(th::kChrome),
-        hbox({count(" pages ", p.pages), count(" links ", p.links), count(" fail ", p.failed), count(" depth ", p.depth)}),
+        hbox({count(" fetched ", p.fetched), count(" links ", s.max_links > 0 ? std::min(p.found, s.max_links) : p.found),
+              count(" fail ", p.failed), count(" depth ", p.depth)}),
         separatorLight() | color(th::kFaint),
     };
     // Checklist: newest at the bottom, brightest; older lines step down toward the chrome grey.

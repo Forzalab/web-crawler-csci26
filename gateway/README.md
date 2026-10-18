@@ -16,7 +16,7 @@ body: GraphAdjacencyList JSON
 | BRIDGES_USER, BRIDGES_KEY | none (required) | host secret store only |
 | BRIDGES_SERVER | http://assignments.bridgesuncc.org | |
 | ASSIGNMENT_MIN / ASSIGNMENT_MAX | 1 / 99999999 | 8 digits (BRIDGES takes big ids, e.g. 69696969); lock to the course range if you like |
-| MAX_BYTES / MAX_NODES | 4 MB / 1000 | open endpoint guard |
+| MAX_BYTES / MAX_NODES | 4 MB / 1000 | open endpoint guard. The TUI never trips it: `/bridges` sends a subset of at most 1000 nodes / 10000 edges (`bridges_subset`) |
 | GATEWAY_TOKEN | unset | if set, callers must send `X-Gateway-Token` |
 | TIMEOUT_MS | 15000 | upstream timeout |
 

@@ -7,6 +7,14 @@ One binary, `wc`, two front ends:
 - **pipe mode** (stdin redirected): reads a fake web from stdin and prints a deterministic report. This is what the tests use. It never touches the network and never really sleeps.
 - **TUI** (stdin is a terminal): FTXUI screen. Crawls with 16 parallel fetches (still polite per host: robots.txt, Crawl-delay, 429 pacing; pipe mode stays sequential with the 0.1 s delay). Esc on the loading screen stops and shows the graph so far; `/resume` crawls on into the same graph. `/bridges` uploads the graph through `gateway/` when `WC_GATEWAY_URL` is set (assignment: a random 7-digit id per session, `BRIDGES_ASSIGNMENT` overrides; `WC_BRIDGES_SUB` default 0, `WC_GATEWAY_TOKEN` if the gateway has `GATEWAY_TOKEN`); after that, a finished `/resume` re-uploads to the same assignment, so the same link shows the bigger graph.
 
+TUI graph screen:
+- **LINKS** meter = discovered URLs (the graph's nodes), capped by the "Max links" prompt. The loading screen counts `fetched` (attempts), `links`, `fail`, `depth`.
+- **Replay**: a finished crawl replays as if live, never longer than 8 s. Small crawls keep one fetch every 120 ms; bigger ones become a wave, one BFS level at a time, siblings landing 3 at a time.
+- **Level of detail**, highways first like a map: tree edges into big subtrees first, edges to depth 1 always, SEEN back-links only once every visible tree edge fits the budget (grows with screen size and zoom). Labels go one ring deeper at zoom 2.5 and everywhere at 5. Labels never touch edge dots (padded, one free row above and below).
+- **Clusters**: 6+ pages of one other site under the same parent fold into one glyph + `site ×count` while zoom < 2.
+- **Focus**: Tab cycles search bar -> preview (if open) -> graph (Tab still completes in the search bar when there is something to complete). The focused part glows orange; the boss-bar rule turns orange for the graph. Preview focused: j/k or arrows scroll, PgUp/PgDn, m max. Graph focused: arrows pan, + - zoom, 0 fit, even with text in the bar. Any other key types into the bar; Esc steps back.
+- **/bridges** sends at most 1000 links / 10000 edges: the most prominent ones (root, first hop, most linked-to, with their tree parents), and says so ("1000 of N links"). Its look: our radial layout pinned in a BRIDGES "window" (no force-layout clump), node colour + shape by site, red star root, a thick rainbow path to the deepest page, big top-10 hubs, hover text = title / URL / depth · in-links · status. Pipe `--bridges` keeps the plain format.
+
 ## Build
 
 Needs CMake 3.16+ and g++ with C++20 or newer. CMake asks for C++23 and falls back to an older standard if the compiler lacks it.
@@ -79,13 +87,13 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 ## Folder map
 
 ```
-src/core/       graph, LinkSource, Renderer, Sleeper, crawl()   (no I/O, no deps)
+src/core/       graph, LinkSource, Renderer, Sleeper, crawl(), tree (spanning tree)   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/team/       josh.cc, logan.cc: Josh and Logan write their parts here (plain C++)
 src/adapters/   JoshFetcher, LoganRenderer: glue from src/team/ to the crawler (teammates never edit)
 src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
-src/bridges/    bridges_json(): our own BRIDGES graph JSON writer (no bridges-cxx, no post)
+src/bridges/    bridges_json(): our own BRIDGES graph JSON writer (no bridges-cxx, no post); bridges_subset() for the TUI
 src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)
 tests/crawl/    ladder: inputfileN / outputfileN

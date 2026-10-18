@@ -1,7 +1,10 @@
 // views_test.cc - headless renders of src/ui/views (state in, Element out).
 // Run: NO_COLOR=1 build/wc_views_test   (exit 1 if any check fails)
 // WC_VIEWS_DUMP=1 also prints a 100x30 main screen for eyeballing.
+// WC_VIEWS_BENCH=1 also times graph frames on a ~1000-node / 11k-edge graph (no asserts).
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -11,6 +14,7 @@
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/screen.hpp>
 
+#include "ui/camera.h"
 #include "ui/matrix.h"
 #include "ui/theme.h"
 #include "ui/views.h"
@@ -54,6 +58,9 @@ struct Fake {
     ReplayFrame f;
 };
 
+// The view takes a shared Scene: the fake's graph + hand-placed layout.
+static std::shared_ptr<const Scene> scene(const Fake& k) { return std::make_shared<const Scene>(make_scene(k.g, k.l)); }
+
 // root -> {google, github}; google -> maps (depth 2) -> deep (3); github -> google (SEEN)
 static Fake fake_graph() {
     Fake k;
@@ -90,10 +97,31 @@ static void test_theme() {
     CHECK(theme::depth_color(0) == theme::kText, "");
 }
 
+// True if label text touches an edge dot or a glyph: a run of 2+ label chars right next
+// to a braille cell or a ◆ (the smoke stick-grep, in C++).
+static bool sticks(const std::string& out) {
+    std::vector<char32_t> cps;
+    for (size_t i = 0; i < out.size();) {
+        unsigned char b = out[i];
+        int n = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+        char32_t cp = n == 1 ? b : b & (0x7F >> n);
+        for (int k = 1; k < n && i + k < out.size(); ++k) cp = (cp << 6) | (out[i + k] & 0x3F);
+        cps.push_back(cp);
+        i += n;
+    }
+    auto word = [](char32_t c) { return (c < 128 && std::isalnum(int(c))) || c == '/' || c == '.' || c == '_' || c == '-'; };
+    auto dot = [](char32_t c) { return (c >= 0x2800 && c <= 0x28FF) || c == 0x25C6; };
+    for (size_t i = 0; i + 2 < cps.size(); ++i) {
+        if (dot(cps[i]) && word(cps[i + 1]) && word(cps[i + 2])) return true;
+        if (word(cps[i]) && word(cps[i + 1]) && dot(cps[i + 2])) return true;
+    }
+    return false;
+}
+
 static void test_graph() {
     Fake k = fake_graph();
     View v{30, 80, 30};  // canvas 160x96 sub-pixels at 80x24
-    std::string out = render(views::graph(k.g, k.l, k.f, v));
+    std::string out = render(views::graph(scene(k), k.f, v));
     CHECK_HAS(out, "google.com");
     CHECK_HAS(out, "example.org");
     CHECK_LACKS(out, "maps.test");  // depth 2: glyph only
@@ -101,10 +129,11 @@ static void test_graph() {
     CHECK_LACKS(out, "deep.test");
     CHECK_HAS(out, "·");
     CHECK_LACKS(out, "www.");
+    CHECK(!sticks(out), out);
 
     k.f.node_t = {1, 0, 0, 0, 0};  // only root shown, edges not started
     k.f.edge_t = {0, 0, 0, 0, 0};
-    out = render(views::graph(k.g, k.l, k.f, v));
+    out = render(views::graph(scene(k), k.f, v));
     CHECK_HAS(out, "example.org");
     CHECK_LACKS(out, "google.com");
 }
@@ -130,7 +159,7 @@ static void test_graph_same_site() {
     k.f.node_t = {1, 1, 1, 1};
     k.f.edge_t = {1, 1, 1};
     k.f.done = true;
-    std::string out = render(views::graph(k.g, k.l, k.f, View{20, 80, 48}));
+    std::string out = render(views::graph(scene(k), k.f, View{20, 80, 48}));
     CHECK_HAS(out, "/domains");
     CHECK_LACKS(out, "/about");     // collides with /domains, which came first
     CHECK_HAS(out, "icann.org");    // other host: host label
@@ -143,51 +172,133 @@ static void test_graph_same_site() {
     size_t p = under.find("iana.org"), cols = 0;
     for (size_t i = 0; i < p; ++i) cols += (static_cast<unsigned char>(under[i]) & 0xC0) != 0x80;
     CHECK(cols == 36, out);
+    CHECK(!sticks(out), out);
 }
 
-// Cross-link (seen) edges: drawn up to 40 nodes, skipped beyond.
-static void test_seen_edges_cap() {
+// A label is padded with a blank cell on each side: an edge running under it never
+// touches the text, it stops one cell short.
+static void test_label_pad() {
+    Fake k;
+    k.g.add_node("https://www.iana.org/", 0);
+    k.g.add_node("https://www.iana.org/domains", 1);
+    k.g.add_node("https://far.test/x", 2);
+    k.g.add_edge(k.g.nodes[0].url, k.g.nodes[1].url, false);
+    k.g.add_edge(k.g.nodes[0].url, k.g.nodes[2].url, false);
+    k.g.add_edge(k.g.nodes[2].url, k.g.nodes[0].url, true);
+    k.l.pos = {{-3, 0}, {-1, 0}, {3, 0}};  // root -> far runs straight through /domains' row
+    k.l.parent = {-1, 0, 0};
+    k.f.node_t = {1, 1, 1};
+    k.f.edge_t = {1, 1, 1};
+    k.f.done = true;
+    std::string out = render(views::graph(scene(k), k.f, View{10, 80, 48}));
+    std::string row = line_of(out, 12);
+    CHECK(row.find(" /domains ") != std::string::npos, out);
+    CHECK(row.find("· /domains ⠁") != std::string::npos, out);  // glyph, pad, label, pad, then the edge
+    CHECK(!sticks(out), out);
+}
+
+// Non-root labels keep rows +-1 clear of other labels; the root's label is exempt.
+static void test_label_halo() {
+    Fake k;
+    k.g.add_node("https://r.test/", 0);
+    k.g.add_node("https://r.test/aaa", 1);
+    k.g.add_node("https://r.test/bbb", 1);  // one row under /aaa, same column: no label
+    k.g.add_node("https://r.test/ccc", 1);  // two rows under /aaa: label kept
+    for (int i = 1; i < 4; ++i) k.g.add_edge(k.g.nodes[0].url, k.g.nodes[i].url, false);
+    k.l.pos = {{0, 0}, {2, -0.4}, {2, 0}, {2, 0.4}};  // scale 10: rows 11, 12, 13 -> /bbb sits between
+    k.l.parent = {-1, 0, 0, 0};
+    k.f.node_t = {1, 1, 1, 1};
+    k.f.edge_t = {1, 1, 1};
+    k.f.done = true;
+    std::string out = render(views::graph(scene(k), k.f, View{10, 40, 48}));
+    CHECK_HAS(out, "/aaa");
+    CHECK_LACKS(out, "/bbb");
+    CHECK_HAS(out, "/ccc");
+    CHECK(!sticks(out), out);
+    // Root label right under the root glyph, a depth-1 label one row below it: both shown.
+    Fake r;
+    r.g.add_node("https://r.test/", 0);
+    r.g.add_node("https://r.test/ddd", 1);
+    r.g.add_edge(r.g.nodes[0].url, r.g.nodes[1].url, false);
+    r.l.pos = {{0, 0}, {-0.6, 0.8}};  // root glyph row 12, its label row 13, /ddd row 14
+    r.l.parent = {-1, 0};
+    r.f.node_t = {1, 1};
+    r.f.edge_t = {1};
+    r.f.done = true;
+    out = render(views::graph(scene(r), r.f, View{10, 80, 48}));
+    CHECK_HAS(line_of(out, 13), "r.test");
+    CHECK_HAS(line_of(out, 14), "/ddd");
+}
+
+// Level of detail: a SEEN back-link draws on a small graph; with 300 depth-2 tree
+// edges over the budget it is culled at fit, and back at zoom 8 (budget x 8).
+static void test_lod() {
     auto build = [](int extra) {
         Fake k;
         k.g.add_node("https://r.test/", 0);
-        k.g.add_node("https://a.test/", 2);  // depth 2: no label in the way
-        k.g.add_node("https://b.test/", 2);
+        k.g.add_node("https://a.test/", 1);
+        k.g.add_node("https://b.test/", 1);
         k.g.add_edge(k.g.nodes[0].url, k.g.nodes[1].url, false);
         k.g.add_edge(k.g.nodes[0].url, k.g.nodes[2].url, false);
         k.g.add_edge(k.g.nodes[1].url, k.g.nodes[2].url, true);
-        k.l.pos = {{0, 0}, {-2, 2}, {2, 2}};
+        k.l.pos = {{0, 0}, {-2, -1.6}, {-2, 1.6}};  // a -> b runs straight down col 30
         k.l.parent = {-1, 0, 0};
-        for (int i = 0; i < extra; ++i) {
+        for (int i = 0; i < extra; ++i) {  // a's kids, far right: off the a -> b column
             k.g.add_node("https://x" + std::to_string(i) + ".test/", 2);
-            k.l.pos.push_back({0, 0});
-            k.l.parent.push_back(0);
+            k.g.add_edge(k.g.nodes[1].url, k.g.nodes.back().url, false);
+            k.l.pos.push_back({3, 0});
+            k.l.parent.push_back(1);
         }
-        k.f.node_t.assign(k.g.nodes.size(), 0);
-        k.f.node_t[0] = k.f.node_t[1] = k.f.node_t[2] = 1;
-        k.f.edge_t = {1, 1, 1};
+        k.f.node_t.assign(k.g.nodes.size(), 1);
+        k.f.edge_t.assign(k.g.edges.size(), 1);
         k.f.done = true;
         return k;
     };
-    auto mid = [](Fake& k) {  // row 10 (y=2), cols 32..48: only the seen edge passes there
-        std::string row = line_of(render(views::graph(k.g, k.l, k.f, View{10, 80, 20})), 10);
-        size_t b = 0, col = 0;
-        while (b < row.size() && col < 32) col += (static_cast<unsigned char>(row[b++]) & 0xC0) != 0x80;
-        size_t e = b;
-        while (e < row.size() && col < 48) col += (static_cast<unsigned char>(row[e++]) & 0xC0) != 0x80;
-        return row.substr(b, e - b);
+    auto seen_dots = [](const Fake& k, double zoom) {  // braille cells at col 30, rows 7..12 (between a and b)
+        std::string out = render(views::graph(scene(k), k.f, View{10, 80, 40}, zoom), 80, 20);
+        int n = 0;
+        for (int row = 7; row <= 12; ++row) {
+            std::string ln = line_of(out, row);
+            size_t b = 0;
+            for (int col = 0; b < ln.size() && col < 30; ++b) col += (static_cast<unsigned char>(ln[b]) & 0xC0) != 0x80;
+            n += ln.compare(b, 2, "\xe2\xa0") == 0 || ln.compare(b, 2, "\xe2\xa1") == 0 || ln.compare(b, 2, "\xe2\xa2") == 0 ||
+                 ln.compare(b, 2, "\xe2\xa3") == 0;
+        }
+        return n;
     };
-    Fake small = build(0), big = build(38);  // 3 and 41 nodes
-    std::string s = mid(small), l = mid(big);
-    CHECK(s.find_first_not_of(' ') != std::string::npos, s);
-    CHECK(l.find_first_not_of(' ') != std::string::npos, l);  // cross-links always on
+    Fake small = build(0), big = build(300);
+    CHECK(seen_dots(small, 1) >= 4, render(views::graph(scene(small), small.f, View{10, 80, 40}), 80, 20));
+    CHECK(seen_dots(big, 1) == 0, render(views::graph(scene(big), big.f, View{10, 80, 40}), 80, 20));
+    CHECK(seen_dots(big, 8) >= 4, render(views::graph(scene(big), big.f, View{10, 80, 40}, 8), 80, 20));
+}
+
+// 7 ext.org kids of an r.org root fold into one "ext.org ×7" glyph zoomed out, unfold at zoom >= 2.
+static void test_cluster() {
+    Fake k;
+    k.g.add_node("https://r.org/", 0);
+    for (int i = 0; i < 7; ++i) {
+        k.g.add_node("https://ext.org/p" + std::to_string(i), 1);
+        k.g.add_edge(k.g.nodes[0].url, k.g.nodes.back().url, false);
+    }
+    k.l = radial_layout(k.g);
+    k.f.node_t.assign(k.g.nodes.size(), 1);
+    k.f.edge_t.assign(k.g.edges.size(), 1);
+    k.f.done = true;
+    std::string out = render(views::graph(scene(k), k.f, View{12, 80, 48}, 1));
+    CHECK_HAS(out, "ext.org ×7");
+    CHECK_LACKS(out, "/p3");
+    CHECK(!sticks(out), out);
+    out = render(views::graph(scene(k), k.f, View{12, 80, 48}, 3));
+    CHECK_LACKS(out, "×7");
+    CHECK_HAS(out, "ext.org");  // members back, each with its own host label
 }
 
 static void test_boss_bar() {
     std::string out = render(views::boss_bar(2, 3, 40, 200, false, false), 80, 2);
     CHECK_HAS(out, "DEPTH");
     CHECK_HAS(out, "2/3");
-    CHECK_HAS(out, "PAGES");
-    CHECK_HAS(out, "40/200");
+    CHECK_HAS(out, "LINKS 40/200");
+    CHECK_LACKS(out, "PAGES");
     CHECK_HAS(out, "▰");
     CHECK_HAS(out, "─");  // rule under the bar
     CHECK(out.find("─") >= out.find("\n"), out);  // ...exactly one: row 2 only
@@ -292,8 +403,8 @@ static void test_field_align() {
 }
 
 static void test_toast_too_small() {
-    std::string out = render(views::toast("Copied 12 URLs"), 30, 3);
-    CHECK_HAS(out, "✓ Copied 12 URLs");
+    std::string out = render(views::toast("Copied 12 URLs"), 20, 3);  // exactly its width
+    CHECK_HAS(out, "│ ✓ Copied 12 URLs │");
     CHECK_HAS(out, "╭");
     out = render(views::too_small(60, 20));
     CHECK_HAS(out, "Enlarge terminal to 80×24 (now 60×20)");
@@ -305,14 +416,14 @@ static std::vector<std::string> page_lines() {
 }
 
 static void test_preview() {
-    std::string out = render(views::preview("maps.google.com", page_lines(), 0, 1.0f, false), 80, 16);
+    std::string out = render(views::preview("maps.google.com", page_lines(), 0, views::focus_border(true, 1.0f, 0), false), 80, 16);
     CHECK(line_of(out, 0).find("PREVIEW · maps.google.com") != std::string::npos, out);
     CHECK(line_of(out, 0).find("╭") != std::string::npos, out);
     CHECK_HAS(out, "Google Maps");
     CHECK_LACKS(out, "# Google");
     CHECK_HAS(out, "- Directions");
     CHECK_HAS(out, "[IMG");
-    CHECK_HAS(out, "Esc close");
+    CHECK_HAS(out, "Tab focus · j/k scroll · m max · Esc close");
     std::string top = line_of(out, 0);
     size_t a = top.find("╭"), b = top.find("╮");
     auto cols = [](const std::string& s) {
@@ -321,13 +432,36 @@ static void test_preview() {
         return n;
     };
     CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 <= 60, out);
-    out = render(views::preview("maps.google.com", page_lines(), 1, 0.0f, false), 80, 16);
+    out = render(views::preview("maps.google.com", page_lines(), 1, views::focus_border(true, 0.0f, 0), false), 80, 16);
     CHECK_LACKS(out, "Google Maps");
     CHECK_HAS(out, "Find local");
-    out = render(views::preview("maps.google.com", page_lines(), 0, 0.5f, true), 100, 16);
+    out = render(views::preview("maps.google.com", page_lines(), 0, views::focus_border(true, 0.5f, 0), true), 100, 16);
     top = line_of(out, 0);
     a = top.find("╭"), b = top.find("╮");
     CHECK(b != std::string::npos && cols(top.substr(a, b - a)) + 1 > 60, out);
+}
+
+// One look for focus: unfocused faint, focused dim orange <-> orange, a fresh change flashes white.
+static void test_focus_border() {
+    CHECK(views::focus_border(false, 1, 1) == theme::kFaint, "unfocused");
+    CHECK(views::focus_border(true, 0, 0) == theme::kAccentDim, "glow 0");
+    CHECK(views::focus_border(true, 1, 0) == theme::kAccent, "glow 1");
+    CHECK(views::focus_border(true, 1, 1) == theme::kText, "flash 1");
+    CHECK(views::focus_border(true, 1, 0.5f) == Color::Interpolate(0.5f, theme::kAccent, theme::kText), "flash 0.5");
+    // Unfocused omnibar: faint border (cell 0,0 is its top-left corner at this size); focused: orange.
+    auto corner = [](Color border) {
+        Screen s = Screen::Create(Dimension::Fixed(40), Dimension::Fixed(3));
+        Render(s, views::omnibar(text("x"), {}, -1, "", border));
+        int x = 0;
+        while (x < 40 && s.PixelAt(x, 0).character != "╭") ++x;
+        return x < 40 ? s.PixelAt(x, 0).foreground_color : Color::Default;
+    };
+    CHECK(corner(views::focus_border(false, 1, 0)) == theme::kFaint, "omnibar unfocused");
+    CHECK(corner(views::focus_border(true, 1, 0)) == theme::kAccent, "omnibar focused");
+    // The boss-bar rule takes the graph's focus colour.
+    Screen s = Screen::Create(Dimension::Fixed(80), Dimension::Fixed(2));
+    Render(s, views::boss_bar(1, 3, 5, 50, false, false, theme::kAccent));
+    CHECK(s.PixelAt(10, 1).foreground_color == theme::kAccent, s.ToString());
 }
 
 static void test_coach() {
@@ -383,14 +517,15 @@ static void test_loading() {
     st.line = "untangling the web…";
     st.tick = 3;
     st.pulse = 0.5f;
-    st.progress.pages = 3, st.progress.ok = 2, st.progress.failed = 1, st.progress.links = 40, st.progress.depth = 1;
+    st.progress.fetched = 3, st.progress.ok = 2, st.progress.failed = 1, st.progress.found = 40, st.progress.depth = 1;
     st.progress.recent = {{"https://www.iana.org/", 0, true}, {"https://www.iana.org/domains", 1, true},
                           {"https://ext.com/very/long/path/that/goes/on/and/on/and/on/forever/more", 1, false}};
     std::string out = render(views::loading(st, emptyElement()), 80, 24);
     CHECK_HAS(out, "⠸ untangling the web…");
     CHECK_HAS(out, "crawling iana.org");
-    CHECK_HAS(out, "pages 3");
+    CHECK_HAS(out, "fetched 3");
     CHECK_HAS(out, "links 40");
+    CHECK_LACKS(out, "pages");
     CHECK_HAS(out, "fail 1");
     CHECK_HAS(out, "depth 1");
     CHECK_HAS(out, "✓ iana.org/");
@@ -422,7 +557,7 @@ static void test_loading() {
         out = render(views::loading(st, rain.render(matrix::kGreenDim) | flex), w, h);
         CHECK_HAS(out, "│ ⠸ untangling the web…");
         CHECK_HAS(out, "│   crawling iana.org ");
-        CHECK_HAS(out, "│ pages 3  links 40  fail 1  depth 1 ");
+        CHECK_HAS(out, "│ fetched 3  links 40  fail 1  depth 1 ");
         CHECK_HAS(out, "│ ✓ iana.org/domains ");
         CHECK_HAS(out, "Esc stop · Ctrl-C quit");
         size_t top = out.find("╭");
@@ -449,6 +584,10 @@ static void test_loading() {
         CHECK(with_rain.size() >= 9 && with_rain == without, out + "\n---\n" + plain);
     }
     st.cols = 80;
+    // links never shows more than Max links (the graph stops there; found keeps counting).
+    st.max_links = 25;
+    CHECK_HAS(render(views::loading(st, emptyElement()), 80, 24), "links 25 ");
+    st.max_links = 0;
     test_loading_fade(st);
     CHECK(views::loading_rows(40) == 32, "loading_rows(40)");
     CHECK(views::loading_rows(5) == 1, "loading_rows(5)");
@@ -459,19 +598,56 @@ static void dump_main() {
     View v{36, 110, 24};
     auto main = vbox({
         views::boss_bar(2, 3, 140, 200, false, false),
-        views::graph(k.g, k.l, k.f, v) | flex,
+        views::graph(scene(k), k.f, v) | flex,
         views::omnibar(text(""), {}, -1, "type to search · /bridges"),
     });
-    main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, 1.0f,
+    main = dbox({main, hbox({filler(), views::preview("maps.google.com", page_lines(), 0, theme::kAccent,
                                                       false)})});
     std::cout << render(main, 100, 30) << "\n";
+}
+
+// ms per graph frame at 200x60 on a 10-ary tree of 1000 nodes + 10k SEEN cross-links.
+static void bench() {
+    CrawlGraph g;
+    auto u = [](int i) { return "https://s" + std::to_string(i % 13) + ".test/p" + std::to_string(i); };
+    g.add_node(u(0), 0);
+    for (int i = 1; i < 1000; ++i) {
+        g.add_node(u(i), g.nodes[size_t((i - 1) / 10)].depth + 1);
+        g.add_edge(u((i - 1) / 10), u(i), false);
+    }
+    uint32_t x = 12345;
+    while (g.edges.size() < 999 + 10000) {
+        x = x * 1664525u + 1013904223u;
+        int a = int((x >> 8) % 1000), b = int((x >> 20) % 1000);
+        if (!g.has_edge(u(a), u(b))) g.add_edge(u(a), u(b), true);
+    }
+    for (int i = 0; i < 1000; ++i) g.record_fetch(u(i), true);
+    auto sc = std::make_shared<const Scene>(make_scene(g));
+    const Layout& l = sc->lay;
+    const int w = 200, h = 60, frames = 50;
+    using Ms = std::chrono::duration<double, std::milli>;
+    auto t0 = std::chrono::steady_clock::now();
+    ReplayFrame f;
+    for (int i = 0; i < frames; ++i) f = replay_at(sc->g, sc->plan, 1000000);
+    double replay = Ms(std::chrono::steady_clock::now() - t0).count() / frames;
+    std::cout << "bench: " << g.nodes.size() << " nodes, " << g.edges.size() << " edges, " << w << "x" << h << "\n";
+    std::cout << "  replay_at       " << replay << " ms/frame\n";
+    for (double zoom : {1.0, 4.0}) {
+        View v = apply(Camera{zoom, 0, 0}, fit(l, w * 2, (h - 5) * 4), w * 2, (h - 5) * 4);
+        t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < frames; ++i) render(views::graph(sc, f, v, zoom), w, h - 5);
+        std::cout << "  graph zoom " << zoom << "    " << Ms(std::chrono::steady_clock::now() - t0).count() / frames << " ms/frame\n";
+    }
 }
 
 int main() {
     test_theme();
     test_graph();
     test_graph_same_site();
-    test_seen_edges_cap();
+    test_label_pad();
+    test_label_halo();
+    test_lod();
+    test_cluster();
     test_boss_bar();
     test_omnibar();
     test_omnibar_colors();
@@ -481,8 +657,10 @@ int main() {
     test_toast_too_small();
     test_preview();
     test_coach();
+    test_focus_border();
     test_loading();
     if (std::getenv("WC_VIEWS_DUMP")) dump_main();
+    if (std::getenv("WC_VIEWS_BENCH")) bench();
     std::cout << (failures ? "FAILED " : "ok ") << checks - failures << "/" << checks << "\n";
     return failures ? 1 : 0;
 }

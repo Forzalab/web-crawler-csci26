@@ -1,7 +1,7 @@
 # TUI smoke suite
 
 Drives the real TUI (`build/wc`) inside detached tmux panes of fixed sizes, types
-the URL / Visualize / depth / pages prompts, waits for the crawl and the replay, then
+the URL / Visualize / depth / links prompts, waits for the crawl and the replay, then
 quits with Esc. Catches crashes, hangs and broken layouts. Needs `tmux` and `python3`.
 
 ## Run
@@ -23,8 +23,8 @@ no `CSI 2J`, alt screen + hidden cursor + mouse on at start, all restored on exi
 Raw traces: `build/smoke/tear/<case>/trace.txt`.
 
 It also runs `tests/smoke/stop_resume.sh`: a slow offline crawl (tree1111, 400 ms per fetch),
-Esc on the loading screen must show the graph within 2 s with fewer than 1000 pages, `/resume`
-must reach `PAGES 1000/1000`, Esc x5 exits 0; Ctrl-C mid-crawl must exit with the alt screen off.
+Esc on the loading screen must show the graph within 2 s with fewer than 1000 links, `/resume`
+must reach `LINKS 1000/1000`, Esc x5 exits 0; Ctrl-C mid-crawl must exit with the alt screen off.
 With a fake `gateway/` on 127.0.0.1: no upload without `/bridges`; `/bridges` after the stop uploads
 once, and the finished `/resume` uploads again (same assignment + sub, 1000 nodes).
 
@@ -32,7 +32,7 @@ once, and the finished `/resume` uploads again (same assignment + sub, 1000 node
 
 | verdict | meaning |
 |---|---|
-| PASS  | crawl finished, final screen has the boss bar (`DEPTH` / `PAGES` on row 1), Esc quit with exit 0 |
+| PASS  | crawl finished, final screen has the boss bar (`DEPTH` / `LINKS` on row 1), Esc quit with exit 0 |
 | CRASH | killed by a signal (exit >= 128), or `core dumped` / `terminate called` / `Segmentation fault` in stderr or the pane |
 | HANG  | crawl not done within the case timeout, or the app did not exit after Esc x5 |
 | ERR   | non-zero exit, URL screen never shown, or layout check failed (`detail` says which) |

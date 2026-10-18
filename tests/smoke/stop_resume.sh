@@ -2,11 +2,13 @@
 # tests/smoke/stop_resume.sh - Esc stops a crawl, /resume finishes it, Ctrl-C quits mid-crawl.
 #   Offline (tree1111 fixture, slow fetches), real TUI in tmux, 120x40, a fake gateway/ on
 #   127.0.0.1 (WC_GATEWAY_URL) that logs every upload:
-#     stop:  Esc on the loading screen -> graph screen within 2 s with PAGES n/1000, n < 1000
-#            -> /resume -> PAGES 1000/1000 -> Esc x5 exits 0; never /bridges -> 0 uploads
+#     stop:  Esc on the loading screen -> graph screen within 2 s with LINKS n/1000, n < 1000
+#            -> /resume -> LINKS 1000/1000 -> Esc x5 exits 0; never /bridges -> 0 uploads
 #     share: BRIDGES_ASSIGNMENT unset: stop -> /bridges (1 upload, n nodes, random 7-digit
 #            assignment shown in the link) -> /resume -> "BRIDGES updated" (2nd upload, same
 #            assignment + sub, 1000 nodes)
+#     big:   Max links 2000 on tree1111 (1111 links) -> /bridges: 1 POST with the 1000-node subset,
+#            a toast saying "1000 of 1111 links"
 #     ctrlc: Ctrl-C on the loading screen -> exits, alt screen off (terminal restored)
 # Exit 1 on any FAIL. Env: BIN=build/wc  OUT=build/smoke/stop_resume  DELAY_MS=400
 set -u
@@ -57,8 +59,8 @@ waitfor() {  # waitfor <sess> <regex> <seconds>
     done
     return 1
 }
-pages() { cap "$1" | head -n 1 | grep -oE 'PAGES [0-9]+/[0-9]+'; }
-start() {  # start <sess> [assignment]: through the prompts, crawl begins (depth 3, 1000 pages)
+links() { cap "$1" | head -n 1 | grep -oE 'LINKS [0-9]+/[0-9]+'; }
+start() {  # start <sess> [assignment] [max links]: through the prompts, crawl begins (depth 3, 1000 links)
     mkdir -p "$OUT/$1/home"
     T new-session -d -s "$1" -x 120 -y 40 -c "$root" \
         env -u BRIDGES_ASSIGNMENT HOME="$OUT/$1/home" WC_FIXTURE="$root/build/smoke/fixtures/tree1111.txt" WC_FIXTURE_DELAY_MS="$DELAY_MS" \
@@ -67,8 +69,8 @@ start() {  # start <sess> [assignment]: through the prompts, crawl begins (depth
     waitfor "$1" 'Paste a URL' 10 || return 1
     T send-keys -t "$1" -l -- "https://tree.example/"; T send-keys -t "$1" Enter; waitfor "$1" 'Visualize' 5
     T send-keys -t "$1" -l y; waitfor "$1" 'Max depth' 5
-    T send-keys -t "$1" -l 3; T send-keys -t "$1" Enter; waitfor "$1" 'Max pages' 5
-    T send-keys -t "$1" -l 1000; T send-keys -t "$1" Enter
+    T send-keys -t "$1" -l 3; T send-keys -t "$1" Enter; waitfor "$1" 'Max links' 5
+    T send-keys -t "$1" -l "${3:-1000}"; T send-keys -t "$1" Enter
     waitfor "$1" 'crawling' 5
 }
 fails=0
@@ -93,14 +95,14 @@ stop_resume() {  # stop_resume <sess> <share: 0|1>
         waitfor $s 'stopped · [0-9]+ left' 2 || bad="no 'stopped · N left' toast"
         local same=0
         for _ in $(seq 1 60); do  # replay: wait until the meter holds still for 2 s
-            cur=$(pages $s)
+            cur=$(links $s)
             if [ -n "$cur" ] && [ "$cur" = "$prev" ]; then same=$((same + 1)); else same=0; fi
             [ "$same" -ge 4 ] && break
             prev=$cur; sleep 0.5
         done
         n=$(grep -oE '[0-9]+/' <<< "$cur" | tr -d /)
         echo "      $s after Esc: $cur"
-        { [ -n "$n" ] && [ "$n" -lt 1000 ]; } || bad="${bad:-PAGES after stop: '$cur' (want n/1000, n < 1000)}"
+        { [ -n "$n" ] && [ "$n" -lt 1000 ]; } || bad="${bad:-LINKS after stop: '$cur' (want n/1000, n < 1000)}"
     fi
     if [ -z "$bad" ] && [ "$share" = 1 ]; then
         T send-keys -t $s -l "/bridges"; T send-keys -t $s Enter
@@ -114,8 +116,8 @@ stop_resume() {  # stop_resume <sess> <share: 0|1>
     fi
     if [ -z "$bad" ]; then
         T send-keys -t $s -l "/resume"; T send-keys -t $s Enter
-        waitfor $s 'PAGES 1000/1000' 30 || bad="PAGES 1000/1000 never shown after /resume ($(pages $s))"
-        echo "      $s after /resume: $(pages $s)"
+        waitfor $s 'LINKS 1000/1000' 30 || bad="LINKS 1000/1000 never shown after /resume ($(links $s))"
+        echo "      $s after /resume: $(links $s)"
     fi
     if [ -z "$bad" ] && [ "$share" = 1 ]; then
         waitfor $s 'BRIDGES updated' 5 || bad="no 'BRIDGES updated' toast"
@@ -132,6 +134,21 @@ stop_resume() {  # stop_resume <sess> <share: 0|1>
 }
 stop_resume stop 0
 stop_resume share 1
+
+# Over 1000 links: /bridges uploads the most prominent 1000 and says so
+s=big bad=""
+start $s 26 2000 || bad="loading screen never shown"
+[ -z "$bad" ] && { waitfor $s 'LINKS 1111/2000' 30 || bad="LINKS 1111/2000 never shown ($(links $s))"; }
+if [ -z "$bad" ]; then
+    T send-keys -t $s -l "/bridges"; T send-keys -t $s Enter
+    waitfor $s '1000 of 1111 links' 5 || bad="no '1000 of 1111 links' toast ($(cap $s | grep -oE '✓ [^│]*' | head -n 1))"
+    for _ in $(seq 1 50); do [ "$(posts $s)" != 0 ] && break; sleep 0.1; done
+    [ -z "$bad" ] && { waitfor $s 'assignments/26/tony' 5 || bad="no BRIDGES link row after /bridges"; }
+    [ -z "$bad" ] && { [ "$(posts $s)" = 1 ] && grep -q "assignment=26&sub=3 1000\$" "$OUT/$s.posts" ||
+        bad="upload: $(tr '\n' ';' < "$OUT/$s.posts" 2> /dev/null) (want 1 POST, 1000 nodes)"; }
+fi
+for _ in 1 2 3 4 5; do dead $s && break; T send-keys -t $s Escape; sleep 0.4; done
+verdict $s "$bad"
 
 # Ctrl-C mid-crawl: quits, terminal restored
 s=ctrlc bad=""
