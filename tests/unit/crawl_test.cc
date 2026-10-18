@@ -112,10 +112,37 @@ static void test_bfs_last_at_max_depth() {
     CHECK_EQ(g.fetches.size(), size_t(1));
 }
 
+// DFS keeps the size cap like BFS: a new page is skipped once g holds maxSize nodes.
+// Tree: A -> B C, B -> D E, C -> F G.
+static void test_dfs_size_cap() {
+    Web web;
+    web.pages["A"] = {"B", "C"};
+    web.pages["B"] = {"D", "E"};
+    web.pages["C"] = {"F", "G"};
+    for (const char* leaf : {"D", "E", "F", "G"}) web.pages[leaf] = {};
+    CrawlConfig cfg;
+    cfg.mode = Mode::DFS;
+    cfg.maxSize = 1;
+    CrawlGraph g;
+    CHECK_EQ(run("A", cfg, web, g), std::string("ok"));
+    CHECK_EQ(g.nodes.size(), size_t(1));
+    CHECK_EQ(g.fetches.size(), size_t(1));
+    CHECK_EQ(g.edges.size(), size_t(0));
+
+    cfg.maxSize = 4;
+    CHECK_EQ(run("A", cfg, web, g), std::string("ok"));
+    std::string nodes, edges;
+    for (const auto& n : g.nodes) nodes += n.url;
+    for (const auto& e : g.edges) edges += e.from + "-" + e.to + " ";
+    CHECK_EQ(nodes, std::string("ABDE"));
+    CHECK_EQ(edges, std::string("A-B B-D B-E "));
+}
+
 int main() {
     test_bfs_queue_drains();
     test_bfs_start_fails();
     test_bfs_last_at_max_depth();
+    test_dfs_size_cap();
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }

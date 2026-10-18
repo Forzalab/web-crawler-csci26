@@ -175,7 +175,7 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
 
 
     // max depth check - compare global vs local
-    if (cfg.__depth >= cfg.maxDepth || cfg.__size > cfg.maxSize)
+    if (cfg.__depth >= cfg.maxDepth)
         return g;
 
     // root doesnt sleep
@@ -201,6 +201,8 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
        bool seen_node = g.has(child_url);
        const int& new_child_depth = cfg.__depth;
 
+       if (!seen_node && int(g.nodes.size()) >= cfg.maxSize) continue; // size cap, same rule as crawl_bfs
+
        // chexk if a CONNECTION existed and record accordingly       
        // record once, bcs claude spec lol
     //       bool seen_node = (seen_edge || url_exist_already);
@@ -218,9 +220,7 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
        } // skip node-adding ritual for seen nodes
 
        g.add_node(child_url, new_child_depth);
-       
-       cfg.__size = g.nodes.size(); // dfs bookkeeping, query capacity after each child is crawled
-       
+
        g = Crawler::crawl_dfs(child_url, cfg, src, sleeper, g); // update graph with new state
     }
     
