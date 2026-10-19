@@ -121,6 +121,11 @@ std::optional<Url> parse_url(const std::string& raw) {
     return u;
 }
 
+std::string with_scheme(const std::string& s) {
+    std::string t = clean(s);
+    return t.find("://") == std::string::npos ? "https://" + t : t;
+}
+
 std::optional<Url> resolve_url(const Url& base, const std::string& raw) {
     std::string ref = clean(raw);
     if (ref.empty()) return base;

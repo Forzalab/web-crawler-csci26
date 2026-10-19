@@ -148,7 +148,8 @@ int tui_main(int argc, char** argv) {
     auto screen = ScreenInteractive::Fullscreen();  // alt screen, mouse on, cursor hidden while drawing
     Step step = Step::Url;
     CrawlConfig cfg;
-    cfg.maxSize = 50;
+    cfg.maxDepth = kDefaultDepth;
+    cfg.maxSize = kDefaultLinks;
     cfg.workers = kWorkers;
     bool visualize = first_run;
 
@@ -496,8 +497,8 @@ int tui_main(int argc, char** argv) {
             case Step::Visualize:
                 return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render(),
                                      "y yes · n no · Enter default · Esc quit");
-            case Step::Depth: return prompt_screen("Max depth [3]", prompt_in->Render());
-            case Step::Links: return prompt_screen("Max links [50]", prompt_in->Render());
+            case Step::Depth: return prompt_screen("Max depth [" + std::to_string(kDefaultDepth) + "]", prompt_in->Render());
+            case Step::Links: return prompt_screen("Max links [" + std::to_string(kDefaultLinks) + "]", prompt_in->Render());
             case Step::Crawling: return crawling_screen(ts);
             case Step::Summary: return summary_screen(g);
             case Step::Main: return main_screen();
@@ -578,7 +579,7 @@ int tui_main(int argc, char** argv) {
                 if (e == Event::Return) {
                     start = !chips.empty() ? chips[0] : url_text;
                     if (start.empty()) return true;
-                    if (start.find("://") == std::string::npos) start = "https://" + start;
+                    start = pick_start(start, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
                     begin_prompt(Step::Visualize, "");
                     return true;
                 }
@@ -591,14 +592,14 @@ int tui_main(int argc, char** argv) {
                 return true;  // other keys are not typed into the box
             case Step::Depth:
                 if (e == Event::Return) {
-                    cfg.maxDepth = int_or(prompt_text, 3);
+                    cfg.maxDepth = int_or(prompt_text, kDefaultDepth);
                     begin_prompt(Step::Links, "");
                     return true;
                 }
                 return false;
             case Step::Links:
                 if (e == Event::Return) {
-                    cfg.maxSize = std::max(1, int_or(prompt_text, 50));
+                    cfg.maxSize = std::max(1, int_or(prompt_text, kDefaultLinks));
                     start_crawl(false);
                     return true;
                 }
