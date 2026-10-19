@@ -104,10 +104,6 @@ add_executable(wc
 )
 target_link_libraries(wc PRIVATE wc_core wc_net wc_ui_views ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)
-# summary.pdf footer: git short sha at configure time (every `make` reconfigures); empty outside git.
-execute_process(COMMAND git rev-parse --short HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                OUTPUT_VARIABLE WC_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-set_source_files_properties(src/ui/report_main.cc PROPERTIES COMPILE_DEFINITIONS "WC_GIT_SHA=\"${WC_GIT_SHA}\"")
 
 # --- unit tests (no network): tests/unit/ ------------------------------------
 add_executable(wc_net_test tests/unit/net_test.cc)

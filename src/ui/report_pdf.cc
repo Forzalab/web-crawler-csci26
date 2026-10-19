@@ -2,8 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
-
-#include "bridges/bridges_json.h"
+#include <vector>
 
 namespace wc {
 
@@ -20,28 +19,21 @@ std::string num(double x) {
     return buf;
 }
 
-// Width of a digits-only string ('d' too): every Helvetica digit is 556/1000 em.
-double digits_width(const std::string& s, double size) { return double(s.size()) * 0.556 * size; }
-
 // One page content stream.
 class Page {
 public:
-    void text(double x, double y, Font f, double size, const std::string& s) {
-        out_ += "BT /F" + std::to_string(f + 1) + ' ' + num(size) + " Tf " + num(x) + ' ' + num(y) + " Td (" +
-                pdf_text(s) + ") Tj ET\n";
+    void text(double x, double y, Font f, double size, const std::string& s, double gray = 0) {
+        out_ += num(gray) + " g BT /F" + std::to_string(f + 1) + ' ' + num(size) + " Tf " + num(x) + ' ' + num(y) +
+                " Td (" + pdf_text(s) + ") Tj ET\n";
     }
-    void gray_text(double x, double y, Font f, double size, const std::string& s, double gray) {
-        out_ += num(gray) + " g\n";
-        text(x, y, f, size, s);
-        out_ += "0 g\n";
+    void line(double x1, double y1, double x2, double y2) {
+        out_ += "q 0.6 G 0.75 w " + num(x1) + ' ' + num(y1) + " m " + num(x2) + ' ' + num(y2) + " l S Q\n";
     }
-    // Filled rect with a thin grey outline (yellow stays visible on white paper).
-    void bar(double x, double y, double w, double h, const std::array<int, 3>& rgb) {
-        out_ += "q " + num(rgb[0] / 255.0) + ' ' + num(rgb[1] / 255.0) + ' ' + num(rgb[2] / 255.0) + " rg 0.4 G 0.5 w " +
-                num(x) + ' ' + num(y) + ' ' + num(w) + ' ' + num(h) + " re B Q\n";
+    void frame(double x, double y, double w, double h) {
+        out_ += "q 0.75 G 0.5 w " + num(x) + ' ' + num(y) + ' ' + num(w) + ' ' + num(h) + " re S Q\n";
     }
-    void line(double x1, double y1, double x2, double y2, double gray = 0.6) {
-        out_ += "q " + num(gray) + " G 0.75 w " + num(x1) + ' ' + num(y1) + " m " + num(x2) + ' ' + num(y2) + " l S Q\n";
+    void image(const std::string& name, double x, double y, double w, double h) {
+        out_ += "q " + num(w) + " 0 0 " + num(h) + ' ' + num(x) + ' ' + num(y) + " cm /" + name + " Do Q\n";
     }
     const std::string& str() const { return out_; }
 
@@ -73,154 +65,101 @@ std::string wall_time(long ms) {
     return buf;
 }
 
-std::string pacific_time(std::time_t t) {
-    std::tm u{};
-    gmtime_r(&t, &u);
-    // DST: 2nd Sunday of March 02:00 PST (10:00 UTC) .. 1st Sunday of November 02:00 PDT (09:00 UTC).
-    auto sunday_utc = [&](int mon, int nth, int hour) {
-        std::tm d{};
-        d.tm_year = u.tm_year, d.tm_mon = mon, d.tm_mday = 1;
-        std::time_t first = timegm(&d);
-        gmtime_r(&first, &d);
-        d.tm_mday = 1 + (7 - d.tm_wday) % 7 + 7 * (nth - 1);
-        d.tm_hour = hour;
-        return timegm(&d);
-    };
-    const bool dst = t >= sunday_utc(2, 2, 10) && t < sunday_utc(10, 1, 9);
-    std::time_t local = t - (dst ? 7 : 8) * 3600;
-    std::tm p{};
-    gmtime_r(&local, &p);
-    char buf[40];
-    std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", &p);
-    return std::string(buf) + (dst ? " PDT" : " PST");
+bool jpeg_info(const std::string& j, int& w, int& h, int& comps) {
+    auto u8 = [&](size_t i) { return static_cast<unsigned char>(j[i]); };
+    if (j.size() < 4 || u8(0) != 0xFF || u8(1) != 0xD8) return false;
+    for (size_t i = 2; i + 9 < j.size();) {
+        if (u8(i) != 0xFF) return false;
+        const int m = u8(i + 1);
+        if (m == 0xFF) {  // fill byte
+            ++i;
+            continue;
+        }
+        if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {  // SOFn
+            h = u8(i + 5) << 8 | u8(i + 6);
+            w = u8(i + 7) << 8 | u8(i + 8);
+            comps = u8(i + 9);
+            return w > 0 && h > 0 && (comps == 1 || comps == 3);
+        }
+        i += 2 + size_t(u8(i + 2) << 8 | u8(i + 3));
+    }
+    return false;
 }
 
 std::string summary_pdf(const ReportSummary& r) {
     Page pg;
     double y = 742;
 
-    // 1. Title, start URL, when / where / settings.
-    pg.text(kL, y, kBold, 18, clip(r.host, 40) + " - " + r.mode + " crawl");
+    // Site.
+    pg.text(kL, y, kBold, 20, clip(r.host, 40));
     y -= 18;
-    pg.text(kL, y, kMono, 9, "Start: " + clip(r.url, 87));
+    pg.text(kL, y, kMono, 9, clip(r.url, 94));
     y -= 14;
-    pg.text(kL, y, kSans, 10, "Started " + r.started_utc + "  (" + r.started_pt + ")    Machine: " + clip(r.machine, 30));
-    y -= 14;
-    pg.text(kL, y, kSans, 10,
-            "Settings: depth " + std::to_string(r.depth) + ", size " + std::to_string(r.size) + ", 0.1 s delay between requests");
+    pg.text(kL, y, kSans, 10, r.mode + " crawl, depth " + std::to_string(r.depth) + ", size " + std::to_string(r.size));
     y -= 10;
     pg.line(kL, y, kR, y);
 
-    // 2. Stat block: two columns, then the blocked breakdown on its own row.
+    // Stats.
     auto stat = [&](double x, const std::string& k, const std::string& v) {
-        pg.gray_text(x, y, kSans, 11, k, 0.35);
+        pg.text(x, y, kSans, 11, k, 0.35);
         pg.text(x + 80, y, kBold, 11, v);
     };
     const double c2 = 316;
     y -= 20;
+    stat(kL, "Fetched", std::to_string(r.fetches));
+    stat(c2, "Failed", std::to_string(r.failed));
+    y -= 16;
     stat(kL, "Nodes", std::to_string(r.nodes));
     stat(c2, "Edges", std::to_string(r.edges));
-    y -= 17;
-    stat(kL, "Fetches", std::to_string(r.fetches));
-    stat(c2, "Failed", std::to_string(r.failed));
-    y -= 17;
-    stat(kL, "Cache", std::to_string(r.cache_hits) + " hits / " + std::to_string(r.cache_misses) + " misses");
-    y -= 17;
-    stat(kL, "Wall time", wall_time(r.wall_ms) + (r.wall_note.empty() ? "" : "   " + r.wall_note));
-    y -= 17;
+    y -= 16;
     stat(kL, "Blocked", std::to_string(r.blocked) + "   (robots.txt " + std::to_string(r.robots) + ", HTTP 429 " +
                             std::to_string(r.too_many) + ", bot wall " + std::to_string(r.bot_wall) + ")");
+    y -= 16;
+    stat(kL, "Wall time", wall_time(r.wall_ms) + (r.wall_note.empty() ? "" : "   " + r.wall_note));
+    y -= 16;
+    stat(kL, "Cache", std::to_string(r.cache_hits) + " hits / " + std::to_string(r.cache_misses) + " misses");
     y -= 12;
     pg.line(kL, y, kR, y);
 
-    // 3. Depth histogram, one bar per depth (0 bars included), BRIDGES ROYGBIV colours.
-    y -= 20;
-    pg.text(kL, y, kBold, 12, "Nodes per depth");
-    const double base = y - 150, top = y - 22;  // bar area; count labels sit above each bar
-    const int n = std::max<int>(1, int(r.depth_hist.size()));
-    const int most = std::max(1, r.depth_hist.empty() ? 0 : *std::max_element(r.depth_hist.begin(), r.depth_hist.end()));
-    const double slot = (kR - kL) / n, bw = std::min(slot * 0.7, 90.0);
-    for (int d = 0; d < n; ++d) {
-        const int c = d < int(r.depth_hist.size()) ? r.depth_hist[size_t(d)] : 0;
-        const double cx = kL + slot * (d + 0.5);
-        const double h = c ? std::max(3.0, (top - base - 12) * c / most) : 0;  // 1 of 999 still shows
-        if (c) pg.bar(cx - bw / 2, base, bw, h, hop_rgb(d));
-        const std::string cs = std::to_string(c), ds = "d" + std::to_string(d);
-        const double fs = std::min(9.0, slot * 0.9 / (0.556 * double(std::max(cs.size(), ds.size()))));
-        if (fs >= 4) {
-            pg.text(cx - digits_width(cs, fs) / 2, base + h + 3, kSans, fs, cs);
-            pg.text(cx - digits_width(ds, fs) / 2, base - 11, kSans, fs, ds);
+    // Pictures: each fitted into a 512 x 260 box, aspect kept, centred.
+    std::vector<std::string> xobj;
+    auto picture = [&](const std::string& caption, const std::string& jpg) {
+        constexpr double bw = kR - kL, bh = 260;
+        y -= 20;
+        pg.text(kL, y, kBold, 12, caption);
+        y -= 6 + bh;
+        int w = 0, h = 0, comps = 0;
+        if (!jpeg_info(jpg, w, h, comps)) {
+            pg.frame(kL, y, bw, bh);
+            pg.text(kL + 12, y + bh / 2, kSans, 10, "no screenshot (scripts/report_shots.sh)", 0.5);
+            return;
         }
-    }
-    pg.line(kL, base, kR, base, 0.3);
-    y = base - 26;
-    pg.line(kL, y, kR, y);
+        const double s = std::min(bw / w, bh / h), iw = w * s, ih = h * s, ix = kL + (bw - iw) / 2, iy = y + (bh - ih) / 2;
+        const std::string name = "Im" + std::to_string(xobj.size() + 1);
+        pg.image(name, ix, iy, iw, ih);
+        pg.frame(ix, iy, iw, ih);
+        xobj.push_back("<< /Type /XObject /Subtype /Image /Width " + std::to_string(w) + " /Height " + std::to_string(h) +
+                       " /ColorSpace /" + (comps == 3 ? "DeviceRGB" : "DeviceGray") +
+                       " /BitsPerComponent 8 /Filter /DCTDecode /Length " + std::to_string(jpg.size()) + " >>\nstream\n" +
+                       jpg + "\nendstream");
+    };
+    picture("BRIDGES", r.bridges_jpg);
+    picture("Our app", r.app_jpg);
 
-    // 4. Failure labels, then the first rows of failures.tsv.
-    y -= 20;
-    pg.text(kL, y, kBold, 12, "Failures and blocks (" + std::to_string(r.failures.size()) + " rows in failures.tsv)");
-    for (size_t i = 0; i < r.labels.size(); ++i) {
-        if (i % 4 == 0) y -= 16;
-        const double x = kL + double(i % 4) * 128;
-        pg.gray_text(x, y, kSans, 10, r.labels[i].first, 0.35);
-        pg.text(x + 72, y, kBold, 10, std::to_string(r.labels[i].second));
-    }
-    y -= 20;
-    constexpr size_t kRows = 12;
-    if (r.failures.empty()) {
-        pg.text(kL, y, kSans, 10, "No failures.");
-    } else {
-        pg.gray_text(kL, y, kBold, 8, "status", 0.35);
-        pg.gray_text(kL + 34, y, kBold, 8, "label", 0.35);
-        pg.gray_text(kL + 100, y, kBold, 8, "url", 0.35);
-        for (size_t i = 0; i < std::min(kRows, r.failures.size()); ++i) {
-            const auto& f = r.failures[i];
-            y -= 10;
-            pg.text(kL, y, kMono, 7.5, std::to_string(f.status));
-            pg.text(kL + 34, y, kMono, 7.5, clip(f.label, 13));
-            pg.text(kL + 100, y, kMono, 7.5, clip(f.url, 91));
-        }
-        if (r.failures.size() > kRows) {
-            y -= 12;
-            pg.gray_text(kL, y, kSans, 8, "... " + std::to_string(r.failures.size() - kRows) + " more in failures.tsv", 0.35);
-        }
-    }
-
-    // 5. BRIDGES link (clickable) or how to get one.
-    y -= 26;
-    std::string annot;
-    if (!r.bridges_url.empty()) {
-        pg.text(kL, y, kBold, 11, "BRIDGES:");
-        const std::string shown = clip(r.bridges_url, 80);
-        pg.text(kL + 56, y, kMono, 9, shown);
-        annot = "<< /Type /Annot /Subtype /Link /Border [0 0 0] /Rect [" + num(kL + 56) + ' ' + num(y - 3) + ' ' +
-                num(kL + 56 + 5.4 * double(shown.size())) + ' ' + num(y + 9) + "] /A << /S /URI /URI (" +
-                pdf_text(r.bridges_url) + ") >> >>";
-    } else {
-        pg.text(kL, y, kSans, 10, "BRIDGES: not uploaded (rerun with --upload; the cache replays it)");
-    }
-
-    // 6. Footer.
-    pg.line(kL, 62, kR, 62);
-    pg.gray_text(kL, 50, kSans, 8,
-                 "Polite crawl: robots.txt, honest User-Agent, 0.1 s between requests. Bot walls reported, not evaded.", 0.35);
-    if (!r.git_sha.empty()) {
-        const std::string b = "build " + clip(r.git_sha, 10);
-        pg.gray_text(kR - 4.8 * double(b.size()), 50, kMono, 8, b, 0.35);  // Courier: 0.6 em per char
-    }
-
-    // Objects: 1 catalog, 2 pages, 3 page, 4 contents, 5-7 fonts, 8 link (optional).
+    // Objects: 1 catalog, 2 pages, 3 page, 4 contents, 5-7 fonts, 8.. images.
+    std::string images;
+    for (size_t i = 0; i < xobj.size(); ++i) images += " /Im" + std::to_string(i + 1) + ' ' + std::to_string(8 + i) + " 0 R";
     std::vector<std::string> obj = {
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + num(kW) + ' ' + num(kH) +
-            "] /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> /Contents 4 0 R" +
-            (annot.empty() ? "" : " /Annots [8 0 R]") + " >>",
+            "] /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >>" +
+            (images.empty() ? "" : " /XObject <<" + images + " >>") + " >> /Contents 4 0 R >>",
         "<< /Length " + std::to_string(pg.str().size()) + " >>\nstream\n" + pg.str() + "endstream",
     };
     for (const char* f : kFontName)
         obj.push_back(std::string("<< /Type /Font /Subtype /Type1 /BaseFont /") + f + " /Encoding /WinAnsiEncoding >>");
-    if (!annot.empty()) obj.push_back(annot);
+    obj.insert(obj.end(), xobj.begin(), xobj.end());
 
     std::string pdf = "%PDF-1.4\n%\xe2\xe3\xcf\xd3\n";
     std::vector<size_t> at;
