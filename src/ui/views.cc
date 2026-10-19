@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <utility>
 
@@ -96,13 +97,27 @@ private:
     int max_w_;
 };
 
+// Traffic pulses on SEEN edges (graph(), pulse_ms >= 0, replay done).
+constexpr int kPulsePeriodMs = 1500;  // one time slot per lane: at most one pulse each
+constexpr int kPulseTravelMs = 800;   // a pulse runs a -> b in this long, then is gone
+constexpr int kPulseLanes = 3;        // most pulses at once (lanes staggered by period / lanes)
+constexpr int kPulseDots = 3;         // pulse length, in dots
+constexpr uint64_t kPulseSkip = 3;    // 1 slot in kPulseSkip stays empty: "sometimes"
+
+uint64_t pulse_hash(uint64_t slot, uint64_t lane) {  // splitmix64 finaliser
+    uint64_t h = slot * 0x9E3779B97F4A7C15ull + (lane + 1) * 0xC2B2AE3D27D4EB4Full;
+    h = (h ^ (h >> 30)) * 0xBF58476D1CE4E5B9ull;
+    h = (h ^ (h >> 27)) * 0x94D049BB133111EBull;
+    return h ^ (h >> 31);
+}
+
 }  // namespace
 
-Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom) {
+Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom, int64_t pulse_ms) {
     const Layout& l = scene->lay;
     // The lambda runs at render time, after the caller's frame may be gone: it shares
     // the scene (no copy) and owns the frame.
-    Element cv = canvas([scene, f = std::move(f), v, zoom](Canvas& c) {
+    Element cv = canvas([scene, f = std::move(f), v, zoom, pulse_ms](Canvas& c) {
         const CrawlGraph& g = scene->g;
         const Layout& l = scene->lay;
         const ReplayPlan& plan = scene->plan;
@@ -132,23 +147,48 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
         // Edges next, so nodes and labels sit on top. Highways first (scene order):
         // tree edges into big subtrees, then SEEN back-links by in-degree, until the
         // budget is spent; edges to depth <= 1 always. Back-links show only once every
-        // visible tree edge fits (reverses the "dense core" decision of 2026-10-17).
-        // Folded and offscreen edges cost nothing.
+        // visible tree edge fits (reverses the "dense core" decision of 2026-10-17), and
+        // get only kSeenShare of what the tree edges left. Folded and offscreen edges cost nothing.
         auto edge = [&](double ax, double ay, double bx, double by, float t, const Color& col) {
             return dotted(c, int(std::lround(ax)), int(std::lround(ay)), int(std::lround(ax + (bx - ax) * t)),
                           int(std::lround(ay + (by - ay) * t)), col, step);
         };
         const int budget = lod_budget(c.width() / 2, c.height() / 4, zoom);
-        int spent = 0;
+        int spent = 0, tree_spent = 0, seen_spent = 0;
+        std::vector<size_t> drawn_seen;  // SEEN edges on screen, for the pulses
         for (size_t i = 0; i < scene->order.size(); ++i) {
             if (int(i) >= scene->n_always && spent >= budget) break;
+            if (int(i) == scene->n_tree) tree_spent = spent;
             const size_t e = size_t(scene->order[i]);
+            const bool seen = g.edges[e].seen;
+            if (seen && seen_spent >= (budget - tree_spent) * kSeenShare) continue;
             if (e >= f.edge_t.size()) continue;
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
             int a = plan.from[e], b = plan.to[e];
             if (t <= 0 || !shown(a) || !shown(b)) continue;
-            Color col = g.edges[e].seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth));
-            spent += edge(sx(a), sy(a), sx(b), sy(b), t, col);
+            Color col = seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth));
+            const bool drew = edge(sx(a), sy(a), sx(b), sy(b), t, col);
+            spent += drew;
+            if (seen && drew) ++seen_spent, drawn_seen.push_back(e);
+        }
+        // Traffic: once the replay is done, a few drawn SEEN edges carry a short
+        // bright run a -> b. Lane k picks an edge per time slot (hash), staggered.
+        if (f.done && pulse_ms >= 0 && !drawn_seen.empty()) {
+            const Color pc = th::to_color(anim::mix(th::rgb::kChrome, th::rgb::kText, 0.5));
+            for (int k = 0; k < kPulseLanes; ++k) {
+                const int64_t at = pulse_ms + int64_t(k) * kPulsePeriodMs / kPulseLanes;
+                const int64_t phase = at % kPulsePeriodMs;
+                const uint64_t h = pulse_hash(uint64_t(at / kPulsePeriodMs), uint64_t(k));
+                if (phase >= kPulseTravelMs || h % kPulseSkip == 0) continue;
+                const size_t e = drawn_seen[size_t(h / kPulseSkip % drawn_seen.size())];
+                const double ax = sx(plan.from[e]), ay = sy(plan.from[e]);
+                const double dx = sx(plan.to[e]) - ax, dy = sy(plan.to[e]) - ay;
+                const int n = int(std::lround(std::max(std::abs(dx), std::abs(dy))));
+                if (n <= 0) continue;
+                const int head = int(double(phase) / kPulseTravelMs * n) / step * step;
+                for (int d = 0, i = head; d < kPulseDots && i >= 0; ++d, i -= step)
+                    c.DrawPoint(int(std::lround(ax + dx * i / n)), int(std::lround(ay + dy * i / n)), true, pc);
+            }
         }
         // Folded clusters: one edge from the parent to the cluster's spot.
         auto csx = [&](const Cluster& k) { return k.pos.x * v.scale + v.ox; };

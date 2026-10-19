@@ -126,6 +126,22 @@ std::string with_scheme(const std::string& s) {
     return t.find("://") == std::string::npos ? "https://" + t : t;
 }
 
+bool valid_start(const std::string& s) {
+    std::string t = with_scheme(s);
+    if (t.find(' ') != std::string::npos) return false;
+    auto u = parse_url(t);
+    if (!u) return false;
+    const std::string& h = u->host;
+    if (h == "localhost" || h[0] == '[') return true;
+    if (h.find('.') == std::string::npos) return false;
+    for (size_t b = 0;;) {  // every label non-empty: no "a..b", ".x", "x."
+        size_t e = h.find('.', b);
+        if ((e == std::string::npos ? h.size() : e) == b) return false;
+        if (e == std::string::npos) return true;
+        b = e + 1;
+    }
+}
+
 std::optional<Url> resolve_url(const Url& base, const std::string& raw) {
     std::string ref = clean(raw);
     if (ref.empty()) return base;

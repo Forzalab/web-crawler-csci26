@@ -19,7 +19,7 @@ struct CrawlConfig {
     int __depth = 0; // internal use
     int __size = 0;
     int workers = 1;                            // > 1 and BFS: parallel fetches, no global delay (TUI). 1 = spec path
-    const std::atomic<bool>* cancel = nullptr;  // parallel only: set true -> return the partial graph now
+    const std::atomic<bool>* cancel = nullptr;  // set true -> return the partial graph now (parallel BFS, crawl_dfs)
 };
 
 // Contract: see the header comment in crawl.cc.

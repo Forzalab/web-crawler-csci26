@@ -14,16 +14,18 @@ namespace wc {
 namespace {
 
 // Clusters: per parent (id order, never inside another cluster), every other
-// site with >= kClusterMin kids. Members and their descendants fold into it.
+// site (Layout::site key) with >= kClusterMin kids. Members and their descendants fold into it.
 void find_clusters(Scene& s, const std::vector<std::vector<int>>& kids) {
     const CrawlGraph& g = s.g;
     s.cluster_of.assign(g.nodes.size(), -1);
+    const bool keyed = s.lay.site.size() == g.nodes.size();  // given layouts (tests) may have none
+    auto key = [&](size_t i) { return keyed ? s.lay.site[i] : site_of(g.nodes[i].url); };
     for (size_t p = 0; p < g.nodes.size(); ++p) {
         if (s.cluster_of[p] >= 0) continue;
-        const std::string own = site_of(g.nodes[p].url);
+        const std::string own = key(p);
         std::vector<std::pair<std::string, std::vector<int>>> by_site;  // first-seen order
         for (int k : kids[p]) {
-            std::string site = site_of(g.nodes[size_t(k)].url);
+            std::string site = key(size_t(k));
             if (site == own) continue;
             auto it = std::find_if(by_site.begin(), by_site.end(), [&](const auto& b) { return b.first == site; });
             if (it == by_site.end()) by_site.push_back({site, {k}});
@@ -98,7 +100,7 @@ Scene make_scene(const CrawlGraph& g, Layout lay) {
 }
 
 int lod_budget(int cols, int rows, double zoom) {
-    return int(std::max(24, cols * rows / 40) * std::clamp(zoom, 0.25, 16.0));
+    return int(std::max(24, cols * rows / 40) * std::clamp(zoom, 1.0, 16.0));
 }
 
 int lod_label_depth(double zoom) { return zoom < 2.5 ? 1 : zoom < 5 ? 2 : INT_MAX; }

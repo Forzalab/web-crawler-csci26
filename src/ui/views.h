@@ -2,6 +2,7 @@
 // so every view renders headless (tests/unit/ui_test.cc snapshots).
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,8 +19,10 @@
 namespace wc::views {
 
 // The graph, drawn on an ftxui::Canvas that fills the given box. zoom = the
-// camera's (1 = fit): far out (< 0.6) edges get sparser dots.
-ftxui::Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom = 1);
+// camera's (1 = fit): far out (< 0.6) edges get sparser dots. pulse_ms = anim::now_ms()
+// lets a few SEEN edges carry traffic pulses once f.done (redraw ~10 fps); -1 = off.
+ftxui::Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double zoom = 1,
+                     int64_t pulse_ms = -1);
 
 // Border of a focusable part (omnibar, preview, the boss-bar rule for the graph).
 // Unfocused: faint grey. Focused: glows dim orange <-> orange with glow in [0,1],

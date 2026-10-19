@@ -17,14 +17,18 @@ Layout radial_layout(const CrawlGraph& g) {
     if (n == 0) return l;
     l.parent = tree_parents(g);  // first NEW edge into each node (core/tree.h)
 
-    // Sites by first appearance: same-site siblings sit side by side (clusters, legend).
-    std::vector<std::string> site(n);
+    // Site keys: site_of(), or the host when the crawl spans fewer than kMinSites
+    // sites (one-domain crawls split by subdomain). By first appearance: same-site
+    // siblings sit side by side (clusters, legend).
+    std::vector<std::string>& site = l.site;
+    site.resize(n);
     std::unordered_map<std::string, int> first;
+    for (int i = 0; i < n; ++i) first.emplace(site[i] = site_of(g.nodes[i].url), 0);
+    if (int(first.size()) < kMinSites)
+        for (int i = 0; i < n; ++i) site[i] = short_label(g.nodes[i].url);
+    first.clear();
     std::vector<int> site_first(n);
-    for (int i = 0; i < n; ++i) {
-        site[i] = site_of(g.nodes[i].url);
-        site_first[i] = first.emplace(site[i], int(first.size())).first->second;
-    }
+    for (int i = 0; i < n; ++i) site_first[i] = first.emplace(site[i], int(first.size())).first->second;
     // Children in id order, then grouped by site (stable); orphans hang off root's wedge.
     std::vector<std::vector<int>> kids(n);
     for (int i = 1; i < n; ++i) kids[l.parent[i] >= 0 ? l.parent[i] : 0].push_back(i);

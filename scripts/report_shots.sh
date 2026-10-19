@@ -29,7 +29,7 @@ if [ "$shot" = 1 ] && command -v tmux > /dev/null; then
     until_screen() { for _ in $(seq 1 $(( $2 * 10 ))); do cap | grep -qE "$1" && return 0; sleep 0.1; done; return 1; }
     keys() { T send-keys -t s -l -- "$1"; [ "${2:-}" = enter ] && T send-keys -t s Enter; sleep 0.5; }
     if until_screen 'Paste a URL' 10; then
-        keys "$url" enter; keys y; keys "$depth" enter; keys "$size" enter
+        keys "$url" enter; keys y; keys "${mode:0:1}"; keys "$depth" enter; keys "$size" enter
         end=$(( $(date +%s) + TIMEOUT ))
         until [ -e "$tmp/home/.wc_tui_seen" ] || [ "$(date +%s)" -ge "$end" ]; do sleep 0.5; done
         prev=""; for _ in $(seq 1 30); do sleep 1; cur=$(cap); [ "$cur" = "$prev" ] && break; prev=$cur; done

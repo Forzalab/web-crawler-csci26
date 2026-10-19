@@ -272,6 +272,59 @@ static void test_lod() {
     CHECK(seen_dots(big, 8) >= 4, render(views::graph(scene(big), big.f, View{10, 80, 40}, 8), 80, 20));
 }
 
+// Traffic pulses: pulse_ms = -1 (default) draws the old frame; once done, some
+// pulse_ms values brighten a few cells of the SEEN edge (never orange), others none.
+static void test_pulse() {
+    Fake k;
+    k.g.add_node("https://r.test/", 0);
+    k.g.add_node("https://a.test/", 1);
+    k.g.add_node("https://b.test/", 1);
+    k.g.add_edge(k.g.nodes[0].url, k.g.nodes[1].url, false);
+    k.g.add_edge(k.g.nodes[0].url, k.g.nodes[2].url, false);
+    k.g.add_edge(k.g.nodes[1].url, k.g.nodes[2].url, true);
+    k.l.pos = {{0, 0}, {-2, -1.6}, {-2, 1.6}};
+    k.l.parent = {-1, 0, 0};
+    k.f.node_t = {1, 1, 1};
+    k.f.edge_t = {1, 1, 1};
+    k.f.done = true;
+    auto sc = scene(k);
+    auto screen = [&](const ReplayFrame& f, int64_t ms) {
+        auto s = Screen::Create(Dimension::Fixed(80), Dimension::Fixed(20));
+        Render(s, ms == -2 ? views::graph(sc, f, View{10, 80, 40}) : views::graph(sc, f, View{10, 80, 40}, 1, ms));
+        return s;
+    };
+    auto diff = [](Screen& a, Screen& b, bool* orange = nullptr) {
+        int n = 0;
+        for (int y = 0; y < 20; ++y)
+            for (int x = 0; x < 80; ++x) {
+                const auto &p = a.PixelAt(x, y), &q = b.PixelAt(x, y);
+                if (p.character == q.character && p.foreground_color == q.foreground_color) continue;
+                ++n;
+                if (orange && q.foreground_color == theme::kAccent) *orange = true;
+            }
+        return n;
+    };
+    Screen base = screen(k.f, -2), off = screen(k.f, -1);
+    CHECK(diff(base, off) == 0, "pulse_ms = -1 changed the frame");
+    int lit = 0, dark = 0, most = 0;
+    bool orange = false;
+    for (int64_t ms = 0; ms < 30000; ms += 100) {
+        Screen s = screen(k.f, ms);
+        int n = diff(base, s, &orange);
+        (n ? lit : dark)++, most = std::max(most, n);
+    }
+    CHECK(lit > 0 && dark > 0, std::to_string(lit) + " lit, " + std::to_string(dark) + " dark");
+    CHECK(most <= 9, "pulse cells: " + std::to_string(most));
+    CHECK(!orange, "pulse in accent orange");
+    ReplayFrame mid = k.f;
+    mid.done = false;
+    Screen live = screen(mid, -2);
+    for (int64_t ms = 0; ms < 3000; ms += 100) {
+        Screen s = screen(mid, ms);
+        CHECK(diff(live, s) == 0, "pulse before the replay is done");
+    }
+}
+
 // 7 ext.org kids of an r.org root fold into one "ext.org ×7" glyph zoomed out, unfold at zoom >= 2.
 static void test_cluster() {
     Fake k;
@@ -647,6 +700,7 @@ int main() {
     test_label_pad();
     test_label_halo();
     test_lod();
+    test_pulse();
     test_cluster();
     test_boss_bar();
     test_omnibar();

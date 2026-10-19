@@ -1,5 +1,5 @@
 # tests/smoke/cases.tsv - one TUI smoke case per line, TAB-separated. '#' = comment.
-# name	url	depth	size	cols	rows	mode(live|offline)	fixture(offline: name in gen_fixtures.py, live: -)	timeout_s
+# name	url	depth	size	cols	rows	mode(live|offline)	fixture(offline: name in gen_fixtures.py, live: -)	timeout_s	[crawl(bfs|dfs), default bfs]
 off_one_1node	https://solo.example/	1	1	80	24	offline	one	30
 off_depth0	https://chain.example/p0	0	1	80	24	offline	chain10	30
 off_chain_d10	https://chain.example/p0	10	30	120	40	offline	chain10	60
@@ -14,6 +14,7 @@ off_unicode_120x40	https://unicode.example/	3	30	120	40	offline	unicode_long	60
 off_unicode_80x24	https://unicode.example/	3	30	80	24	offline	unicode_long	60
 off_many_sites	https://hub.example/	3	100	120	40	offline	many_sites	60
 off_failures	https://broken.example/	1	30	80	24	offline	failures	60
+off_tree_dfs	https://tree.example/	3	200	120	40	offline	tree1111	60	dfs
 live_iana_80x24	https://www.iana.org/	1	30	80	24	live	-	180
 live_iana_phone	https://www.iana.org/	1	30	50	40	live	-	180
 live_redirect_http	http://iana.org/	1	30	80	24	live	-	180
