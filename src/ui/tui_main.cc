@@ -1,7 +1,7 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
 // URL -> Visualize? -> Mode (BFS / DFS) -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
 // URL step: an invalid URL (valid_start) shows a red line; Enter / Tab do nothing on it.
-// Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps.
+// Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps, no back-link pulses.
 // Focus (ui/focus.h): Tab cycles search bar -> preview (if open) -> graph; Esc steps back.
 // Graph keys (graph focused, or an empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
 // Preview keys (preview focused): j/k or arrows scroll, PgUp/PgDn 10 lines, m max.
@@ -192,7 +192,7 @@ int tui_main(int argc, char** argv) {
     ProgressTap tap(source);  // the loading screen reads tap.snapshot(); g stays the worker's until done
     std::string start;
     CrawlGraph g;
-    std::thread worker, ticker;
+    std::thread worker, ticker, pulser;  // pulser: ~11 fps on the graph screen, for the back-link pulses
     std::atomic<bool> crawl_done{false}, quitting{false}, stop_crawl{false};
     cfg.cancel = &stop_crawl;  // Esc on the loading screen
     bool resumed = false;      // last crawl was a /resume: no replay
@@ -349,6 +349,13 @@ int tui_main(int argc, char** argv) {
         scene = std::make_shared<const Scene>(make_scene(g));
         t0 = last_frame = last_input = Clock::now();
         step = Step::Main;
+        if (!no_anim && !pulser.joinable())
+            pulser = std::thread([&] {
+                while (!quitting) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(90));
+                    screen.PostEvent(Event::Custom);
+                }
+            });
         set_focus(Focus::Omni);
         refresh_hits();
         if (resumed && shared) upload(true);  // same assignment + sub: the old link shows the new graph
@@ -447,7 +454,7 @@ int tui_main(int argc, char** argv) {
         View v = apply(cam, fit(scene->lay, ts.dimx * 2, rows_left * 4), ts.dimx * 2, rows_left * 4);
 
         Element body = vbox({views::boss_bar(f.depth, cfg.maxDepth, f.size, cfg.maxSize, fd, fs, border(Focus::Graph)),
-                             views::graph(scene, f, v, cam.zoom) | flex,
+                             views::graph(scene, f, v, cam.zoom, no_anim ? -1 : anim::now_ms()) | flex,
                              views::omnibar(omni_in->Render(), rows, bridges_shown ? 0 : selected, ghost, border(Focus::Omni))});
         // Overlays, back to front: preview (right, v-centered), coach (above omnibar), toast (top right, under the boss bar).
         if (pv_open) {
@@ -689,6 +696,7 @@ int tui_main(int argc, char** argv) {
     screen.Loop(app);
     quitting = true;
     if (ticker.joinable()) ticker.join();
+    if (pulser.joinable()) pulser.join();
     std::cout.flush();  // every _Exit below skips TermLock's destructor
     if (stopped_once) std::_Exit(0);  // detached crawl fetches may still hold the fetchers
     if (pv_busy || up_busy) std::_Exit(0);  // a preview fetch / upload is mid-network
