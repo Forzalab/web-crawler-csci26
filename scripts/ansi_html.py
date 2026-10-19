@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """ansi_html.py < frame.ansi > frame.html - a `tmux capture-pane -e` frame as one HTML page (for a screenshot).
-SGR only: reset, bold, dim, italic, underline, reverse, 16/256/truecolor fg + bg. No dependencies."""
-import html, re, sys
+SGR only: reset, bold, dim, italic, underline, reverse, 16/256/truecolor fg + bg. No dependencies.
+ANSI_BG=#000000 sets the page / default background (e.g. a pure black projector check)."""
+import html, os, re, sys
 
 BASE16 = ["#000000", "#cd0000", "#00cd00", "#cdcd00", "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
           "#7f7f7f", "#ff0000", "#00ff00", "#ffff00", "#5c5cff", "#ff00ff", "#00ffff", "#ffffff"]
-FG, BG = "#d0d0d0", "#101014"
+FG, BG = "#d0d0d0", os.environ.get("ANSI_BG", "#101014")
 
 
 def xterm(n):

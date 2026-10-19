@@ -1,6 +1,8 @@
 // hybrid_test.cc - crawl_hybrid (BFS layers, trie order inside a layer), the lava ramp,
 // and the hybrid replay wave. Run: build/wc_hybrid_test   (exit 1 if any check fails)
 #include <atomic>
+#include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -125,17 +127,32 @@ static void test_rules() {
     CHECK(cut.fetches.empty() && cut.nodes.size() == size_t(1));
 }
 
-static double lum(anim::Rgb c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+// WCAG relative luminance; contrast vs black = (L + 0.05) / 0.05.
+static double lum(anim::Rgb c) {
+    auto lin = [](int v) { double x = v / 255.0; return x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4); };
+    return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+}
 
 static void test_ramp() {
-    CHECK((theme::depth_rgb(0, 5) == anim::Rgb{255, 248, 230}));
-    CHECK((theme::depth_rgb(5, 5) == anim::Rgb{85, 48, 105}));
-    CHECK((theme::depth_rgb(9, 5) == anim::Rgb{85, 48, 105}));
-    CHECK((theme::depth_rgb(3, 0) == anim::Rgb{255, 248, 230}));
-    bool mono = true;
+    CHECK((theme::depth_rgb(0, 5) == anim::Rgb{255, 250, 235}));
+    CHECK((theme::depth_rgb(5, 5) == anim::Rgb{120, 210, 255}));
+    CHECK((theme::depth_rgb(9, 5) == anim::Rgb{120, 210, 255}));
+    CHECK((theme::depth_rgb(3, 0) == anim::Rgb{255, 250, 235}));
+    // Projector: every ring >= 5:1 on pure black; neighbouring rings clearly apart.
+    bool bright = true, apart = true;
     for (int m = 1; m <= 12; ++m)
-        for (int d = 1; d <= m; ++d) mono = mono && lum(theme::depth_rgb(d, m)) <= lum(theme::depth_rgb(d - 1, m));
-    CHECK(mono);
+        for (int d = 0; d <= m; ++d) {
+            anim::Rgb c = theme::depth_rgb(d, m);
+            bright = bright && (lum(c) + 0.05) / 0.05 >= 5;
+            if (d > 0 && m <= 6) {
+                anim::Rgb p = theme::depth_rgb(d - 1, m);
+                apart = apart && std::abs(c.r - p.r) + std::abs(c.g - p.g) + std::abs(c.b - p.b) >= 75;  // tightest: max 6, rings 2-3 (orange, 80)
+            }
+        }
+    CHECK(bright);
+    CHECK(apart);
+    // Chrome text too.
+    CHECK((lum(theme::rgb::kChrome) + 0.05) / 0.05 >= 5 && (lum(theme::rgb::kAccentDim) + 0.05) / 0.05 >= 5);
 }
 
 // Big hybrid crawl replays as a wave; inside a level, fetch order = start order (the sweep).

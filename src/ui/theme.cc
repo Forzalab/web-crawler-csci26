@@ -18,8 +18,9 @@ ftxui::Color depth_color(int depth) {
 }
 
 anim::Rgb depth_rgb(int depth, int max_depth) {
-    static const anim::Rgb kLava[] = {{255, 248, 230}, {255, 220, 60}, {255, 140, 0},
-                                      {230, 50, 20},   {190, 25, 55},  {85, 48, 105}};
+    // Bright on pure black (projector): every stop and every mix >= 5:1 against #000.
+    static const anim::Rgb kLava[] = {{255, 250, 235}, {255, 225, 60}, {255, 150, 30},
+                                      {255, 70, 80},   {255, 80, 230}, {120, 210, 255}};
     constexpr int kSeg = int(std::size(kLava)) - 1;
     if (max_depth <= 0 || depth <= 0) return kLava[0];
     if (depth >= max_depth) return kLava[kSeg];

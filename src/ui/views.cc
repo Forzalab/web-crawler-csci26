@@ -313,14 +313,33 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             if (place(col, row, w, !root)) c.DrawText((col - 1) * 2, row * 4, " " + lab + " ", white(root));
         }
     });
-    // Legend, bottom-left: the depth ramp (colour = depth), then shape -> site.
-    Elements legend{text(" ")};
-    if (!th::no_color() && scene->max_depth > 0) {
-        legend.push_back(text("depth 0 ") | color(th::kChrome));
-        for (int d = 0; d <= scene->max_depth; ++d) legend.push_back(text("██") | color(th::depth_color(d, scene->max_depth)));
-        legend.push_back(text(" " + std::to_string(scene->max_depth) + "   ") | color(th::kChrome));
+    // Legend, bottom-left. Colour: one boxed panel, the depth ramp (colour = depth, 0..max under
+    // it) on top, then shape -> site, one per line. NO_COLOR: the old one-row legend (sites only).
+    if (!th::no_color()) {
+        Elements rows;
+        if (scene->max_depth > 0) {
+            Elements ramp, nums;
+            for (int d = 0; d <= scene->max_depth; ++d) {
+                ramp.push_back(text("███") | color(th::depth_color(d, scene->max_depth)));
+                nums.push_back(text(std::to_string(d)) | color(th::kChrome) | size(WIDTH, EQUAL, 3));
+            }
+            rows.push_back(text("depth") | color(th::kChrome));
+            rows.push_back(hbox(std::move(ramp)));
+            rows.push_back(hbox(std::move(nums)));
+        }
+        if (l.sites.size() >= 2) {
+            if (!rows.empty()) rows.push_back(separatorLight() | color(th::kFaint));
+            for (size_t r = 0; r < l.sites.size(); ++r)
+                rows.push_back(hbox({text(th::glyph(int(r), Status::Fetched)) | color(th::kText),
+                                     text(" " + l.sites[r]) | color(th::kChrome)}));
+            rows.push_back(text("· other") | color(th::kChrome));
+        }
+        if (rows.empty()) return cv;
+        Element panel = vbox(std::move(rows)) | borderStyled(ROUNDED, th::kFaint) | clear_under;
+        return dbox({cv, vbox({filler(), hbox({text(" "), std::move(panel), filler()})})});
     }
-    if (l.sites.size() < 2) return legend.size() > 1 ? dbox({cv, vbox({filler(), hbox(std::move(legend))})}) : cv;
+    if (l.sites.size() < 2) return cv;
+    Elements legend{text(" ")};
     for (size_t r = 0; r < l.sites.size(); ++r)
         legend.push_back(hbox({text(th::glyph(int(r), Status::Fetched)) | color(th::kText),
                                text(" " + l.sites[r] + "   ") | color(th::kChrome)}));
@@ -380,7 +399,7 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
     // Input never grows (Input is xflex): the ghost sits right after the typed text, not mid-box.
     Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input) | xflex_factor(0, 1), text(first) | color(th::kChrome), filler()})};
     for (size_t p = ghost.find('\n'); p != std::string::npos; p = ghost.find('\n', p + 1))
-        box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome) | dim);
+        box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome));
     rows.push_back(input_box(vbox(std::move(box)), border));
     // Centred column, <= 60 cols and <= half the screen; results share it.
     return std::make_shared<CenterCap>(vbox(std::move(rows)), 60);
@@ -416,7 +435,7 @@ Element preview(const std::string& title, const std::vector<std::string>& lines,
     }
     Element content = vbox({
         vbox(std::move(body)) | flex,
-        text("Tab focus · j/k scroll · m max · Esc close") | dim | color(th::kChrome),
+        text("Tab focus · j/k scroll · m max · Esc close") | color(th::kChrome),
     });
     // color() paints the border; every child above sets its own colour on top.
     Element panel = window(text(" PREVIEW · " + title + " ") | bold | color(th::kAccent),
@@ -431,7 +450,7 @@ Element coach(int step, int total, const std::string& t) {
                hbox({text(std::to_string(step) + "/" + std::to_string(total)) | bold |
                          color(th::kAccent),
                      text("  " + t) | color(th::kText)}),
-               text("Tab next · Esc skip") | dim | color(th::kChrome),
+               text("Tab next · Esc skip") | color(th::kChrome),
            }) |
            borderStyled(ROUNDED, th::kFaint) | clear_under;  // opaque over the graph
 }
@@ -480,7 +499,7 @@ Element loading(const LoadingState& s, Element background) {
     // clear_under: the box is opaque, so a background layer (rain) never shows through the text.
     Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge) | clear_under;
     // Blank top row balances the footer row (same rule as the prompt screens).
-    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc stop · Ctrl-C quit") | color(th::kChrome) | dim)}) | flex;
+    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc stop · Ctrl-C quit") | color(th::kChrome))}) | flex;
     return dbox({std::move(background), std::move(content)});
 }
 

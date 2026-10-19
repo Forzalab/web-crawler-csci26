@@ -107,7 +107,7 @@ std::string bridges_url(const std::string& assignment) {
 // The blank top row balances the footer row, so the body is centred on the whole screen.
 Element step_screen(Element body, const std::string& footer) {
     return vbox({text(""), filler(), hcenter(std::move(body)), filler(),
-                 hcenter(text(footer) | color(th::kChrome) | dim)}) |
+                 hcenter(text(footer) | color(th::kChrome))}) |
            flex;
 }
 
@@ -139,7 +139,7 @@ Element mode_screen(Element input, bool anim) {
         hy.push_back(paint ? std::move(ch) | color(th::to_color(c)) : std::move(ch));
     }
     Element tag = text(" ★ recommended");
-    auto plain = [&](const std::string& s) { return paint ? text(s) | color(th::kChrome) | dim : text(s) | dim; };
+    auto plain = [&](const std::string& s) { return paint ? text(s) | color(th::kChrome) : text(s) | dim; };
     return vbox({views::field("Mode?", std::move(input), 8), text(""),
                  hbox({hbox(std::move(hy)), paint ? std::move(tag) | color(th::kAccent) : std::move(tag), text("    "),
                        plain("[b]fs"), text("   "), plain("[d]fs")})});
