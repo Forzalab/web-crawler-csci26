@@ -15,7 +15,7 @@ TUI graph screen:
 - **Sites** (node shape, legend, clusters) = last two host labels (`icann.org`), but a crawl of fewer than 3 such sites keys by host instead (`en.wikipedia.org`, `de.wikipedia.org`: one shape each).
 - **Clusters**: 6+ pages of one other site under the same parent fold into one glyph + `site ×count` (`en.wikipedia.org ×7`) while zoom < 2.
 - **Focus**: Tab cycles search bar -> preview (if open) -> graph (Tab still completes in the search bar when there is something to complete). The focused part glows orange; the boss-bar rule turns orange for the graph. Preview focused: j/k or arrows scroll, PgUp/PgDn, m max. Graph focused: arrows pan, + - zoom, 0 fit, even with text in the bar. Any other key types into the bar; Esc steps back.
-- **/bridges** sends at most 1000 links / 10000 edges: the most prominent ones (root, first hop, most linked-to, with their tree parents), and says so ("1000 of N links"). Its look: our radial layout pinned in a BRIDGES "window" (no force-layout clump), node colour + shape by site, red star root, a thick rainbow path to the deepest page, big top-10 hubs, hover text = title / URL / depth · in-links · status. Pipe `--bridges` keeps the plain format.
+- **/bridges** sends at most 1000 links / 10000 edges: the most prominent ones (root, first hop, most linked-to, with their tree parents), and says so ("1000 of N links"). Its look: our radial layout pinned in a BRIDGES "window" (no force-layout clump), node colour by hops (ROYGBIV: red root, orange, yellow, green, ...) + shape by site, red star root, bold back-links, a thick rainbow path to the deepest page, big top-10 hubs, hover text = title / URL / depth · in-links · status. Pipe `--bridges` keeps the plain format.
 
 ## Build
 
