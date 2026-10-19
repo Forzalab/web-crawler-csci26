@@ -68,7 +68,8 @@ start() {  # start <sess> [assignment] [max links]: through the prompts, crawl b
         bash -c '"$0" 2> "$1"; echo $? > "$2"' "$root/$BIN" "$OUT/$1/stderr.txt" "$OUT/$1/exit.txt"
     waitfor "$1" 'Paste a URL' 10 || return 1
     T send-keys -t "$1" -l -- "https://tree.example/"; T send-keys -t "$1" Enter; waitfor "$1" 'Visualize' 5
-    T send-keys -t "$1" -l y; waitfor "$1" 'Max depth' 5
+    T send-keys -t "$1" -l y; waitfor "$1" 'Mode' 5
+    T send-keys -t "$1" Enter; waitfor "$1" 'Max depth' 5  # BFS: /resume is BFS only
     T send-keys -t "$1" -l 3; T send-keys -t "$1" Enter; waitfor "$1" 'Max links' 5
     T send-keys -t "$1" -l "${3:-1000}"; T send-keys -t "$1" Enter
     waitfor "$1" 'crawling' 5

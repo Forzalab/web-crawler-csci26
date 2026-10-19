@@ -25,6 +25,10 @@ std::optional<Url> parse_url(const std::string& s);
 // What a person typed: trimmed, "https://" added when there is no scheme. Not validated.
 std::string with_scheme(const std::string& s);
 
+// Worth crawling as typed: parse_url(with_scheme(s)) ok, no spaces, and the host is
+// localhost, an IP / [v6], or dotted with no empty label ("espn.com" yes, "hello" / "." no).
+bool valid_start(const std::string& s);
+
 // `ref` (href, Location header...) against `base`. Fragment dropped.
 // nullopt = empty after trimming, not http/https (mailto:, javascript:...), or bad.
 std::optional<Url> resolve_url(const Url& base, const std::string& ref);

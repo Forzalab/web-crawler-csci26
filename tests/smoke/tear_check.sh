@@ -48,6 +48,7 @@ run() {  # run <name> <cols> <rows> <quit: esc|ctrlc>
     waitfor "$s" 'Paste a URL' 15 || echo "  ($name: URL screen not seen)"
     T send-keys -t "$s" -l -- "https://star.example/"; T send-keys -t "$s" Enter; sleep 0.5
     T send-keys -t "$s" -l y; sleep 0.5
+    T send-keys -t "$s" Enter; sleep 0.5  # Mode: BFS
     T send-keys -t "$s" -l 1; T send-keys -t "$s" Enter; sleep 0.5
     T send-keys -t "$s" -l 100; T send-keys -t "$s" Enter
     for _ in $(seq 1 150); do [ -e "$dir/home/.wc_tui_seen" ] && break; sleep 0.2; done

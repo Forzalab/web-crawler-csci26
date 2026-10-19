@@ -81,6 +81,13 @@ static void test_with_scheme() {
     CHECK_EQ(parse_url(with_scheme("espn.com"))->host, "espn.com");
 }
 
+static void test_valid_start() {  // the TUI URL step: garbage never reaches the crawl
+    for (const char* ok : {"espn.com", "https://a.b/x", "http://localhost:8080", "https://solo.example/", "1.2.3.4", "http://[::1]/"})
+        CHECK_EQ(valid_start(ok), true);
+    for (const char* bad : {"hello", "http://", "ftp://x.org", "a b.com", ".", "", "a..b", "x.com."})
+        CHECK_EQ(valid_start(bad), false);
+}
+
 static void test_pick_start() {
     int calls = 0;
     auto fail_with = [&](const std::string& error, int status) {
@@ -659,6 +666,7 @@ static void test_pdf_upload() {
 int main() {
     test_parse();
     test_with_scheme();
+    test_valid_start();
     test_pick_start();
     test_resolve();
     test_links();

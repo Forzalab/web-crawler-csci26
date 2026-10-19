@@ -1,5 +1,6 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
-// URL -> Visualize? -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
+// URL -> Visualize? -> Mode (BFS / DFS) -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
+// URL step: an invalid URL (valid_start) shows a red line; Enter / Tab do nothing on it.
 // Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps.
 // Focus (ui/focus.h): Tab cycles search bar -> preview (if open) -> graph; Esc steps back.
 // Graph keys (graph focused, or an empty omnibar): arrows pan, + - zoom (or wheel), 0 fit.
@@ -8,7 +9,8 @@
 // Every frame is one bracketed write (ui/term_lock.h): no row-by-row redraw.
 // Enter on a result opens its page preview (cache, else live fetch).
 // Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
-// and shows the graph so far; /resume crawls on into the same graph.
+// and shows the graph so far; /resume crawls on into the same graph (BFS only).
+// DFS: the spec path, sequential crawl_dfs with the 0.1 s delay.
 // /bridges uploads the graph through gateway/ when WC_GATEWAY_URL is set (WC_BRIDGES_SUB = 0,
 // WC_GATEWAY_TOKEN optional). Assignment: BRIDGES_ASSIGNMENT, else a random 7-digit id picked
 // once per session. Once uploaded, a finished /resume re-uploads to the same assignment + sub,
@@ -37,6 +39,7 @@
 #include "net/cache.h"
 #include "net/gateway.h"
 #include "net/https_fetcher.h"
+#include "net/url.h"
 #include "ui/anim.h"
 #include "ui/camera.h"
 #include "ui/fixture_source.h"
@@ -76,7 +79,7 @@ const std::vector<std::string> kCoach = {
     "/bridges to share.",
 };
 
-enum class Step { Url, Visualize, Depth, Links, Crawling, Main, Summary };
+enum class Step { Url, Visualize, Mode, Depth, Links, Crawling, Main, Summary };
 
 bool settled(const Camera& a, const Camera& b) {
     return std::abs(a.zoom - b.zoom) < 1e-3 && std::abs(a.px - b.px) < 1e-3 && std::abs(a.py - b.py) < 1e-3;
@@ -106,12 +109,14 @@ Element step_screen(Element body, const std::string& footer) {
            flex;
 }
 
-Element url_screen(const std::vector<std::string>& chips, Element input) {
+// typed: the live text; not empty and not valid_start -> a red line under the field.
+Element url_screen(const std::vector<std::string>& chips, Element input, const std::string& typed) {
     Elements chip_row;
     for (const auto& c : chips) {
         chip_row.push_back(text("[ " + short_label(c) + " ✕ ] ") | color(th::kAccent));
     }
-    return step_screen(vbox({hbox(std::move(chip_row)), views::field("", std::move(input), 50)}),
+    Element bad = typed.empty() || valid_start(typed) ? text("") : text("not a URL: " + typed) | color(th::kError);
+    return step_screen(vbox({hbox(std::move(chip_row)), views::field("", std::move(input), 50), std::move(bad)}),
                        "Enter crawl · Tab add URL · Esc quit");
 }
 
@@ -128,7 +133,7 @@ Element summary_screen(const CrawlGraph& g) {
     auto row = [](const std::string& k, int v) {
         return hbox({text(k) | color(th::kChrome) | size(WIDTH, EQUAL, 12), text(std::to_string(v)) | bold | color(th::kText)});
     };
-    return step_screen(vbox({text(g.nodes.empty() ? "?" : short_label(g.nodes[0].url)) | bold | color(th::kAccent), text(""),
+    return step_screen(vbox({text((g.nodes.empty() ? "?" : short_label(g.nodes[0].url)) + " · " + to_string(g.mode)) | bold | color(th::kAccent), text(""),
                              row("links", int(g.nodes.size())), row("edges", int(g.edges.size())),
                              row("fetched", ok), row("failed", bad), row("unfetched", un),
                              row("max depth", maxd)}),
@@ -469,7 +474,7 @@ int tui_main(int argc, char** argv) {
     auto crawling_screen = [&](Dimensions ts) -> Element {
         int64_t ms = ms_since(crawl_t0);
         views::LoadingState st;
-        st.host = short_label(start);
+        st.host = short_label(start) + " · " + to_string(cfg.mode);
         st.line = loading_line(ms);
         st.tick = tick;
         st.cols = ts.dimx;
@@ -493,10 +498,12 @@ int tui_main(int argc, char** argv) {
         // Only the graph needs the room: prompts, loading and summary fit a phone (~50 cols).
         if (step == Step::Main && (ts.dimx < 80 || ts.dimy < 24)) return views::too_small(ts.dimx, ts.dimy);
         switch (step) {
-            case Step::Url: return url_screen(chips, url_in->Render());
+            case Step::Url: return url_screen(chips, url_in->Render(), url_text);
             case Step::Visualize:
                 return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render(),
                                      "y yes · n no · Enter default · Esc quit");
+            case Step::Mode:
+                return prompt_screen("Mode? [b]fs or [d]fs", prompt_in->Render(), "b BFS · d DFS · Enter BFS · Esc quit");
             case Step::Depth: return prompt_screen("Max depth [" + std::to_string(kDefaultDepth) + "]", prompt_in->Render());
             case Step::Links: return prompt_screen("Max links [" + std::to_string(kDefaultLinks) + "]", prompt_in->Render());
             case Step::Crawling: return crawling_screen(ts);
@@ -516,6 +523,7 @@ int tui_main(int argc, char** argv) {
         if (q.verb == "resume") {
             set_omni("");
             refresh_hits();
+            if (g.mode == Mode::DFS) return toast("/resume: BFS only");  // resume_crawl is BFS order
             if (pending(g, cfg.maxDepth) == 0) return toast("nothing to resume");
             close_preview();
             return start_crawl(true);
@@ -571,14 +579,14 @@ int tui_main(int argc, char** argv) {
         };
         switch (step) {
             case Step::Url:
-                if (e == Event::Tab && !url_text.empty()) {
+                if (e == Event::Tab && !url_text.empty() && valid_start(url_text)) {
                     chips.push_back(url_text);
                     url_text.clear();
                     return true;
                 }
                 if (e == Event::Return) {
                     start = !chips.empty() ? chips[0] : url_text;
-                    if (start.empty()) return true;
+                    if (start.empty() || !valid_start(start)) return true;
                     start = pick_start(start, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
                     begin_prompt(Step::Visualize, "");
                     return true;
@@ -587,9 +595,15 @@ int tui_main(int argc, char** argv) {
             case Step::Visualize:
                 if (auto a = yes_no_key(e, first_run)) {  // y/n answers at once, Enter = default
                     visualize = *a;
-                    begin_prompt(Step::Depth, "");
+                    begin_prompt(Step::Mode, "");
                 }
                 return true;  // other keys are not typed into the box
+            case Step::Mode:  // b/d answer at once, Enter = BFS
+                if (e == Event::Return || e == Event::Character('b') || e == Event::Character('B')) cfg.mode = Mode::BFS;
+                else if (e == Event::Character('d') || e == Event::Character('D')) cfg.mode = Mode::DFS;
+                else return true;  // ignored, like Visualize
+                begin_prompt(Step::Depth, "");
+                return true;
             case Step::Depth:
                 if (e == Event::Return) {
                     cfg.maxDepth = int_or(prompt_text, kDefaultDepth);

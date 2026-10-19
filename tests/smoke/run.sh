@@ -94,7 +94,7 @@ layout_check() {  # layout_check <frame text> <small>: "" = ok, else what is wro
 }
 
 results=() fails=0 n=0
-while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
+while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s crawl; do
     [[ -z "$name" || "$name" == \#* ]] && continue
     [ -n "$only" ] && [ "$mode" != "$only" ] && continue
     [ -n "$filter" ] && ! grep -qE -- "$filter" <<< "$name" && continue
@@ -108,7 +108,7 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
     if [ "$mode" = offline ]; then
         envs+=(WC_FIXTURE="$fixdir/$fixture.txt" WC_FIXTURE_DELAY_MS="$FIXTURE_DELAY_MS")
     fi
-    printf '%-26s %-7s d=%-2s s=%-4s %4sx%-3s ... ' "$name" "$mode" "$depth" "$size" "$cols" "$rows"
+    printf '%-26s %-7s %-3s d=%-2s s=%-4s %4sx%-3s ... ' "$name" "$mode" "${crawl:-bfs}" "$depth" "$size" "$cols" "$rows"
     t_start=$(now)
     # fresh HOME: first run every time (Visualize defaults to Y, coach marks on).
     T new-session -d -s "$sess" -x "$cols" -y "$rows" -c "$root" \
@@ -121,7 +121,8 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s; do
         frame "url"
         T send-keys -t "$sess" -l -- "$url"
         step "" 'Visualize'
-        answer "y" 'Max depth'
+        answer "y" 'Mode'
+        if [ "${crawl:-bfs}" = dfs ]; then answer "d" 'Max depth'; else step "" 'Max depth'; fi
         step "$depth" 'Max links'
         step "$size" 'crawling|DEPTH'
         t_crawl=$(now)

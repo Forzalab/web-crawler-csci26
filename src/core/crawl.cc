@@ -174,6 +174,8 @@ CrawlGraph& Crawler::crawl_dfs(const std::string& root_url, CrawlConfig cfg, Lin
     // one link many branches, so crawl parebt first, then pricess children, run func on EACH children.
 
 
+    if (cfg.cancel && *cfg.cancel) return g;  // TUI Esc: the graph so far (null = spec path)
+
     // max depth check - compare global vs local
     if (cfg.__depth >= cfg.maxDepth)
         return g;
