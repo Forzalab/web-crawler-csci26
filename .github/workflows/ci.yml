@@ -47,6 +47,9 @@ jobs:
           build/wc_query_test
           NO_COLOR=1 build/wc_views_test
 
+      - name: Report mode (wc --report, offline fixture)
+        run: tests/report/run.sh build/wc
+
       - name: BRIDGES JSON golden tests
         continue-on-error: true
         run: build/test_bridges_json tests/bridges/golden

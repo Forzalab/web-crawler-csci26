@@ -69,6 +69,46 @@ Polite by default:
 - **429 / 503 + Retry-After**: wait (header value, else 1 s then 2 s, max 30 s) and retry up to 2 times. After that the host stays paced (max 5 s before each request). A `Crawl-delay:` in robots.txt paces the same way.
 - **Status label** per page (`label=` on stderr): `OK`, `ROBOTS`, `HTTP_404`, `TLS`, `TIMEOUT`, `DNS`, `CONNECT`, `REDIRECTS`, `NOT_HTML`, `OFFLINE`, `JS_SHELL` (page loaded but has no links and mentions JavaScript), ... (`status_label()` in `src/net/https_fetcher.h`).
 
+## Report crawls
+
+One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as the TUI
+(our fetcher + `.wc-cache/` + robots.txt + honest UA), but the spec path: sequential `crawl()`, 0.1 s sleep between requests.
+
+```sh
+./a.out --report URL [--bfs|--dfs] [--depth 3] [--size 1000] [--out DIR] [--cache DIR] [--offline] [--upload]
+```
+
+- Cache is on: a rerun replays from `.wc-cache/` and never touches the site. `--offline` = cache only.
+- `--upload` posts `graph.json` through the gateway (needs `WC_GATEWAY_URL`, like `/bridges`) and writes `bridges_url.txt`.
+- stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
+- `WC_FIXTURE=file` crawls a fake web instead (`tests/report/run.sh`, offline, in `make test` and CI).
+
+Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
+
+| File | What |
+|---|---|
+| `stats.json` | url, mode, depth, size, nodes, edges, fetches, failed, blocked (+ `blocked_by` robots / 429 / bot-wall), depth_histogram (sums to nodes), wall_ms, cache hits / misses, started_at |
+| `failures.tsv` | url, status, error, label: `dead` (404/410/DNS/connect), `robots`, `429`, `redirect-loop`, `tls`, `timeout`, `bot-wall` (403, 202 with no links, JS_SHELL), `other` |
+| `graph.json` | `bridges_json(bridges_subset(g))`: at most 1000 nodes, BRIDGES GraphAdjacencyList |
+| `bridges_url.txt` | `--upload` only: the BRIDGES link |
+
+The 10 report crawls (5 sites x BFS / DFS, spec defaults depth 3, size 1000):
+
+```sh
+./a.out --report https://en.wikipedia.org/wiki/Wars_of_the_Roses --bfs
+./a.out --report https://en.wikipedia.org/wiki/Wars_of_the_Roses --dfs
+./a.out --report "https://www.google.com/search?q=wars+of+the+roses" --bfs
+./a.out --report "https://www.google.com/search?q=wars+of+the+roses" --dfs
+./a.out --report https://www.espn.com/ --bfs
+./a.out --report https://www.espn.com/ --dfs
+./a.out --report https://wowcubedocs.com/ --bfs
+./a.out --report https://wowcubedocs.com/ --dfs
+./a.out --report https://dwarfdig.com/ --bfs
+./a.out --report https://dwarfdig.com/ --dfs
+```
+
+Polite only: robots.txt is obeyed and bot walls are reported (`blocked`), never worked around.
+
 ## Tests
 
 ```sh
@@ -94,12 +134,13 @@ src/adapters/   JoshFetcher, LoganRenderer: glue from src/team/ to the crawler (
 src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
 src/bridges/    bridges_json(): our own BRIDGES graph JSON writer (no bridges-cxx, no post); bridges_subset() for the TUI
-src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL)
+src/ui/         pipe_main (tests), tui_main (FTXUI), links_main (--links URL), report_main (--report URL)
 src/main.cc     isatty(0) ? TUI : pipe   (--pipe / --tui override)
 tests/crawl/    ladder: inputfileN / outputfileN
 tests/run.sh    test runner
 tests/unit/     unit tests (wc_net_test)
 tests/bridges/  golden tests for bridges_json()
+tests/report/   offline check of --report (stats.json / failures.tsv / graph.json)
 third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 ```
 
