@@ -75,6 +75,11 @@ std::string quote(const std::string& s) {
 
 }  // namespace
 
+std::array<int, 3> hop_rgb(int depth) {
+    const Rgba& c = kHop[std::clamp(depth, 0, 6)];
+    return {c.r, c.g, c.b};
+}
+
 std::vector<int> in_links(const CrawlGraph& g) {
     std::vector<int> in(g.nodes.size(), 0);
     for (const Edge& e : g.edges)

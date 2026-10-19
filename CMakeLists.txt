@@ -72,6 +72,7 @@ add_library(wc_ui_logic STATIC
   src/ui/progress.cc
   src/ui/anim.cc
   src/ui/yes_no.cc
+  src/ui/report_pdf.cc  # --report summary.pdf (no deps)
 )
 target_include_directories(wc_ui_logic PUBLIC src)
 target_link_libraries(wc_ui_logic PUBLIC wc_core)
@@ -103,6 +104,10 @@ add_executable(wc
 )
 target_link_libraries(wc PRIVATE wc_core wc_net wc_ui_views ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)
+# summary.pdf footer: git short sha at configure time (every `make` reconfigures); empty outside git.
+execute_process(COMMAND git rev-parse --short HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE WC_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+set_source_files_properties(src/ui/report_main.cc PROPERTIES COMPILE_DEFINITIONS "WC_GIT_SHA=\"${WC_GIT_SHA}\"")
 
 # --- unit tests (no network): tests/unit/ ------------------------------------
 add_executable(wc_net_test tests/unit/net_test.cc)
@@ -128,7 +133,9 @@ add_executable(wc_views_test tests/unit/views_test.cc)  # headless snapshots
 target_link_libraries(wc_views_test PRIVATE wc_ui_views ftxui::component)  # real Input in test_input_colors
 add_executable(wc_matrix_test tests/unit/matrix_test.cc)  # matrix rain
 target_link_libraries(wc_matrix_test PRIVATE wc_ui_views)
-foreach(t wc_ui_test wc_query_test wc_views_test wc_matrix_test)
+add_executable(wc_report_pdf_test tests/unit/report_pdf_test.cc)  # summary.pdf writer
+target_link_libraries(wc_report_pdf_test PRIVATE wc_ui_logic)
+foreach(t wc_report_pdf_test wc_ui_test wc_query_test wc_views_test wc_matrix_test)
   target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 

@@ -4,7 +4,7 @@
 //   --bfs | --dfs   --depth N (3)   --size N (1000)   --out DIR (runs/<host>-<bfs|dfs>/)
 //   --cache DIR (.wc-cache)   --offline (cache only)   --upload (needs WC_GATEWAY_URL)
 // WC_FIXTURE=file: fake web instead of the network (tests/report/), no sleeps.
-// Writes DIR/stats.json, DIR/failures.tsv, DIR/graph.json (+ DIR/bridges_url.txt on --upload).
+// Writes DIR/stats.json, DIR/failures.tsv, DIR/graph.json, DIR/summary.pdf (+ DIR/bridges_url.txt on --upload).
 // stdout: one summary line. stderr: one line per fetch.
 #include <chrono>
 #include <cstdlib>
@@ -16,6 +16,8 @@
 #include <map>
 #include <random>
 
+#include <unistd.h>
+
 #include "adapters/josh_fetcher.h"
 #include "bridges/bridges_json.h"
 #include "core/crawl.h"
@@ -26,6 +28,7 @@
 #include "ui/fixture_source.h"
 #include "ui/front_ends.h"
 #include "ui/omni_query.h"
+#include "ui/report_pdf.h"
 
 namespace wc {
 
@@ -103,14 +106,17 @@ std::string tsv(std::string s) {  // one field: no tabs / newlines
     return s;
 }
 
-std::string utc_now() {
-    std::time_t t = std::time(nullptr);
+std::string utc(std::time_t t, const char* fmt) {
     std::tm tm{};
     gmtime_r(&t, &tm);
     char buf[32];
-    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
+    std::strftime(buf, sizeof buf, fmt, &tm);
     return buf;
 }
+
+#ifndef WC_GIT_SHA
+#define WC_GIT_SHA ""
+#endif
 
 }  // namespace
 
@@ -158,7 +164,8 @@ int report_main(int argc, char** argv) {
     NoSleeper none;
     Sleeper& sleeper = fixture ? static_cast<Sleeper&>(none) : real;
 
-    const std::string started_at = utc_now();
+    const std::time_t started = std::time(nullptr);
+    const std::string started_at = utc(started, "%Y-%m-%dT%H:%M:%SZ");
     const auto t0 = std::chrono::steady_clock::now();
     CrawlGraph g = crawl(url, cfg, tap, sleeper);
     const long wall_ms = long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
@@ -218,6 +225,31 @@ int report_main(int argc, char** argv) {
             std::ofstream(out + "/bridges_url.txt") << link << '\n';
         }
     }
+
+    ReportSummary sum;
+    auto u = parse_url(url);
+    sum.host = u && !u->host.empty() ? u->host : url;
+    sum.mode = to_string(cfg.mode), sum.url = url;
+    sum.started_utc = utc(started, "%Y-%m-%d %H:%M UTC"), sum.started_pt = pacific_time(started);
+    char host[256] = "";
+    gethostname(host, sizeof host - 1);
+    sum.machine = host, sum.bridges_url = link, sum.git_sha = WC_GIT_SHA;
+    sum.depth = cfg.maxDepth, sum.size = cfg.maxSize, sum.nodes = int(g.nodes.size()), sum.edges = int(g.edges.size());
+    sum.fetches = int(g.fetches.size()), sum.failed = failed, sum.blocked = blocked;
+    sum.robots = blocked_by["robots"], sum.too_many = blocked_by["429"], sum.bot_wall = blocked_by["bot-wall"];
+    sum.cache_hits = hits, sum.cache_misses = misses, sum.wall_ms = wall_ms;
+    sum.depth_hist.assign(size_t(cfg.maxDepth) + 1, 0);
+    for (const auto& [d, n] : hist) {
+        if (d >= int(sum.depth_hist.size())) sum.depth_hist.resize(size_t(d) + 1, 0);
+        sum.depth_hist[size_t(d)] = n;
+    }
+    for (const char* k : {"dead", "robots", "429", "redirect-loop", "tls", "timeout", "bot-wall", "other"}) sum.labels.push_back({k, 0});
+    for (const Outcome& o : tap.log) {
+        if (o.kind.empty()) continue;
+        for (auto& [k, n] : sum.labels) n += k == o.kind;
+        sum.failures.push_back({o.url, o.status, o.kind});
+    }
+    std::ofstream(out + "/summary.pdf", std::ios::binary) << summary_pdf(sum);
 
     std::cout << "report " << to_string(cfg.mode) << ' ' << url << " depth=" << cfg.maxDepth << " size=" << cfg.maxSize
               << " nodes=" << g.nodes.size() << " edges=" << g.edges.size() << " fetches=" << g.fetches.size()
