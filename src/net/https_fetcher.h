@@ -42,6 +42,11 @@ struct FetchResult {
 // JS_SHELL (OK page with `links` == 0 that mentions JavaScript: probably needs a browser).
 std::string status_label(const FetchResult& r, long links = -1);
 
+// The start URL a person typed. A scheme is kept as typed. A bare domain tries https://
+// through `probe`; no HTTP response at all (TLS, CONNECT, DNS, TIMEOUT, IO, ...) switches
+// to http:// (one stderr line). An HTTP status is an answer: stays https.
+std::string pick_start(const std::string& typed, const std::function<FetchResult(const std::string&)>& probe);
+
 class PageCache;
 
 class HttpsFetcher : public LinkSource {

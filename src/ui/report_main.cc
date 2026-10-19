@@ -117,6 +117,8 @@ std::string utc_now() {
 int report_main(int argc, char** argv) {
     std::string url, out, cache_dir = ".wc-cache";
     CrawlConfig cfg;
+    cfg.maxDepth = kDefaultDepth;
+    cfg.maxSize = kDefaultLinks;
     bool upload = false, offline = false;
     for (int i = 1; i < argc; ++i) {
         bool has_arg = i + 1 < argc;
@@ -131,14 +133,10 @@ int report_main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--offline")) offline = true;
     }
     if (url.empty() || cfg.maxDepth < 0 || cfg.maxSize < 1) {
-        std::cerr << "usage: wc --report URL [--bfs|--dfs] [--depth 3] [--size 1000] [--out DIR] [--cache DIR] [--offline] [--upload]\n";
+        std::cerr << "usage: wc --report URL [--bfs|--dfs] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload]\n";
         return 2;
     }
     const std::string mode = cfg.mode == Mode::BFS ? "bfs" : "dfs";
-    if (out.empty()) {
-        auto u = parse_url(url);
-        out = "runs/" + (u && !u->host.empty() ? u->host : std::string("site")) + "-" + mode;
-    }
     const char* gateway = std::getenv("WC_GATEWAY_URL");
     if (upload && !(gateway && *gateway)) {
         std::cerr << "--upload needs WC_GATEWAY_URL\n";
@@ -152,6 +150,11 @@ int report_main(int argc, char** argv) {
     tls.use_robots(true);
     RoutedFetcher routed(josh, tls);
     auto fixture = fixture_source_from_env();
+    if (!fixture) url = offline ? with_scheme(url) : pick_start(url, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
+    if (out.empty()) {
+        auto u = parse_url(url);
+        out = "runs/" + (u && !u->host.empty() ? u->host : std::string("site")) + "-" + mode;
+    }
     LinkSource& inner = fixture ? *fixture : offline ? static_cast<LinkSource&>(tls) : routed;  // offline: never Josh's network
     ReportTap tap(inner, fixture ? nullptr : &tls);
     RealSleeper real;

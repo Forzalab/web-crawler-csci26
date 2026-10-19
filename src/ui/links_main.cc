@@ -36,11 +36,12 @@ int links_main(int argc, char** argv) {
     tls.use_robots(robots);
     RoutedFetcher routed(josh, tls);
     LinkSource& src = offline ? static_cast<LinkSource&>(tls) : routed;  // offline: never touch Josh's network
-    auto links = src.links(url);
+    std::string start = pick_start(url, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
+    auto links = src.links(start);
 
     const FetchResult& r = tls.last();
-    if (r.url == url)
-        std::cerr << "[fetch] via=tls label=" << tls.label_of(url) << " status=" << r.status << " redirects=" << r.redirects << " final=" << r.final_url
+    if (r.url == start)
+        std::cerr << "[fetch] via=tls label=" << tls.label_of(start) << " status=" << r.status << " redirects=" << r.redirects << " final=" << r.final_url
                   << " type=" << r.content_type << " bytes=" << r.body.size()
                   << " cache=" << (!use_cache ? "off" : r.from_cache ? "hit" : "miss")
                   << (r.error.empty() ? "" : " error=" + r.error) << '\n';
