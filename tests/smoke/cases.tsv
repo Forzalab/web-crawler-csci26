@@ -1,5 +1,5 @@
 # tests/smoke/cases.tsv - one TUI smoke case per line, TAB-separated. '#' = comment.
-# name	url	depth	size	cols	rows	mode(live|offline)	fixture(offline: name in gen_fixtures.py, live: -)	timeout_s	[crawl(bfs|dfs), default bfs]
+# name	url	depth	size	cols	rows	mode(live|offline)	fixture(offline: name in gen_fixtures.py, live: -)	timeout_s	[crawl(bfs|dfs|hybrid), default bfs]
 off_one_1node	https://solo.example/	1	1	80	24	offline	one	30
 off_depth0	https://chain.example/p0	0	1	80	24	offline	chain10	30
 off_chain_d10	https://chain.example/p0	10	30	120	40	offline	chain10	60
@@ -31,3 +31,5 @@ live_google_search	https://www.google.com/search?q=web+crawler	1	30	120	40	live	
 live_espn	https://www.espn.com/	3	30	80	24	live	-	300
 live_wowcubedocs	https://wowcubedocs.com/	3	100	120	40	live	-	400
 live_dwarfdig	https://dwarfdig.com/	3	100	200	60	live	-	400
+off_tree_hybrid_s1000	https://tree.example/	3	1000	120	40	offline	tree1111	120	hybrid
+off_wikilike_hybrid_200x60	https://wiki.example/wiki/Article_0	3	300	200	60	offline	wikilike600	120	hybrid

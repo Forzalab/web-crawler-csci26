@@ -9,7 +9,7 @@
 
 namespace wc {
 
-enum class Mode { BFS, DFS };
+enum class Mode { BFS, DFS, Hybrid };  // Hybrid: crawl_hybrid() (core/crawl_hybrid.h)
 
 enum class Status { Unfetched, Fetched, Failed };
 
