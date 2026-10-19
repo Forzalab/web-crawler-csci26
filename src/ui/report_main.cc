@@ -12,6 +12,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <iostream>
 #include <map>
 #include <random>
@@ -114,6 +115,26 @@ std::string utc(std::time_t t, const char* fmt) {
     return buf;
 }
 
+// A live run's wall time + start, kept by --offline replays (the report wants the live numbers).
+// From DIR/stats.json when it holds live numbers: written by a live run, or carried by an earlier replay.
+struct LiveTimes {
+    long wall_ms = -1;  // -1 = none
+    std::time_t started = 0;
+};
+LiveTimes live_times(const std::string& stats_path) {
+    std::ifstream in(stats_path);
+    std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    LiveTimes t;
+    const bool replay = s.find("\"replay\": true") != std::string::npos;
+    size_t w = s.find("\"wall_ms\": ");
+    if (s.empty() || w == std::string::npos || (replay && json_string(s, "wall_source") != "live")) return t;
+    std::tm tm{};
+    if (!strptime(json_string(s, "started_at").c_str(), "%Y-%m-%dT%H:%M:%SZ", &tm)) return t;
+    t.started = timegm(&tm);
+    t.wall_ms = std::atol(s.c_str() + w + 11);
+    return t;
+}
+
 #ifndef WC_GIT_SHA
 #define WC_GIT_SHA ""
 #endif
@@ -164,11 +185,14 @@ int report_main(int argc, char** argv) {
     NoSleeper none;
     Sleeper& sleeper = fixture ? static_cast<Sleeper&>(none) : real;
 
-    const std::time_t started = std::time(nullptr);
-    const std::string started_at = utc(started, "%Y-%m-%dT%H:%M:%SZ");
+    const LiveTimes live = offline ? live_times(out + "/stats.json") : LiveTimes{};  // before this run rewrites it
+    std::time_t started = std::time(nullptr);
     const auto t0 = std::chrono::steady_clock::now();
     CrawlGraph g = crawl(url, cfg, tap, sleeper);
-    const long wall_ms = long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
+    long wall_ms = long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
+    const bool carried = live.wall_ms >= 0;  // replay over a live run: report the live time + start
+    if (carried) wall_ms = live.wall_ms, started = live.started;
+    const std::string started_at = utc(started, "%Y-%m-%dT%H:%M:%SZ");
 
     int failed = 0, hits = 0, misses = 0;
     std::map<std::string, int> blocked_by{{"robots", 0}, {"429", 0}, {"bot-wall", 0}};
@@ -200,7 +224,8 @@ int report_main(int argc, char** argv) {
     sep = "";
     for (const auto& [d, n] : hist) s << sep << '"' << d << "\": " << n, sep = ", ";
     s << "},\n  \"wall_ms\": " << wall_ms << ",\n  \"cache\": {\"hits\": " << hits << ", \"misses\": " << misses
-      << "},\n  \"started_at\": \"" << started_at << "\"\n}\n";
+      << "},\n  \"started_at\": \"" << started_at << "\",\n  \"replay\": " << (offline ? "true" : "false")
+      << ",\n  \"wall_source\": \"" << (offline && !carried ? "replay" : "live") << "\"\n}\n";
 
     std::ofstream f(out + "/failures.tsv");
     f << "url\tstatus\terror\tlabel\n";
@@ -238,6 +263,8 @@ int report_main(int argc, char** argv) {
     sum.fetches = int(g.fetches.size()), sum.failed = failed, sum.blocked = blocked;
     sum.robots = blocked_by["robots"], sum.too_many = blocked_by["429"], sum.bot_wall = blocked_by["bot-wall"];
     sum.cache_hits = hits, sum.cache_misses = misses, sum.wall_ms = wall_ms;
+    if (carried) sum.wall_note = "(live run, " + sum.started_utc + ")";
+    else if (offline) sum.wall_note = "(cache replay, not live)";
     sum.depth_hist.assign(size_t(cfg.maxDepth) + 1, 0);
     for (const auto& [d, n] : hist) {
         if (d >= int(sum.depth_hist.size())) sum.depth_hist.resize(size_t(d) + 1, 0);

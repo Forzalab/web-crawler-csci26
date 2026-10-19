@@ -17,6 +17,7 @@ struct ReportSummary {
     int depth = 0, size = 0, nodes = 0, edges = 0, fetches = 0, failed = 0;
     int blocked = 0, robots = 0, too_many = 0, bot_wall = 0, cache_hits = 0, cache_misses = 0;
     long wall_ms = 0;
+    std::string wall_note;                 // "(live run, ...)" | "(cache replay, not live)" | "" (live run)
     std::vector<int> depth_hist;                       // [d] = nodes at depth d, d0..maxDepth
     std::vector<std::pair<std::string, int>> labels;   // failure label -> count, print order
     struct Row { std::string url; int status = 0; std::string label; };

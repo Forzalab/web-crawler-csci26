@@ -124,8 +124,9 @@ std::string summary_pdf(const ReportSummary& r) {
     stat(kL, "Fetches", std::to_string(r.fetches));
     stat(c2, "Failed", std::to_string(r.failed));
     y -= 17;
-    stat(kL, "Wall time", wall_time(r.wall_ms));
-    stat(c2, "Cache", std::to_string(r.cache_hits) + " hits / " + std::to_string(r.cache_misses) + " misses");
+    stat(kL, "Cache", std::to_string(r.cache_hits) + " hits / " + std::to_string(r.cache_misses) + " misses");
+    y -= 17;
+    stat(kL, "Wall time", wall_time(r.wall_ms) + (r.wall_note.empty() ? "" : "   " + r.wall_note));
     y -= 17;
     stat(kL, "Blocked", std::to_string(r.blocked) + "   (robots.txt " + std::to_string(r.robots) + ", HTTP 429 " +
                             std::to_string(r.too_many) + ", bot wall " + std::to_string(r.bot_wall) + ")");

@@ -19,7 +19,7 @@ for mode in bfs dfs; do
 import json, sys
 out, mode, line = sys.argv[1:]
 s = json.load(open(out + "/stats.json"))
-keys = "url mode depth size nodes edges fetches failed blocked blocked_by depth_histogram wall_ms cache started_at".split()
+keys = "url mode depth size nodes edges fetches failed blocked blocked_by depth_histogram wall_ms cache started_at replay wall_source".split()
 miss = [k for k in keys if k not in s]
 assert not miss, f"missing {miss}"
 assert s["url"] == "A" and s["mode"] == mode.upper() and s["depth"] == 5 and s["size"] == 10, s
@@ -43,4 +43,25 @@ if shutil.which("pdftotext"):
 PY
     then echo "PASS $mode: $line"; else echo "FAIL $mode"; fail=1; fi
 done
+
+# --offline replay over a live run keeps the live wall_ms + started_at (and says so); twice in a row too.
+# With no live stats, the replay's own time is labelled "cache replay, not live".
+fx() { WC_FIXTURE=tests/crawl/inputfile9 "$BIN" --report A --bfs --depth 5 --size 10 --out "$1" "${@:2}" > /dev/null 2>&1; }
+fx "$tmp/rp"
+sed -i 's/"wall_ms": [0-9]*/"wall_ms": 110300/; s/"started_at": "[^"]*"/"started_at": "2026-10-19T01:59:05Z"/' "$tmp/rp/stats.json"
+fx "$tmp/rp" --offline && fx "$tmp/rp" --offline && fx "$tmp/fresh" --offline
+if python3 - "$tmp" <<'PY2'
+import json, shutil, subprocess, sys
+t = sys.argv[1]
+s = json.load(open(t + "/rp/stats.json"))
+assert s["replay"] is True and s["wall_source"] == "live", s
+assert s["wall_ms"] == 110300 and s["started_at"] == "2026-10-19T01:59:05Z", s
+f = json.load(open(t + "/fresh/stats.json"))
+assert f["replay"] is True and f["wall_source"] == "replay", f
+if shutil.which("pdftotext"):
+    txt = lambda d: subprocess.run(["pdftotext", t + d + "/summary.pdf", "-"], capture_output=True, text=True).stdout
+    assert "1:50" in txt("/rp") and "live run, 2026-10-19 01:59 UTC" in txt("/rp"), txt("/rp")
+    assert "cache replay, not live" in txt("/fresh"), txt("/fresh")
+PY2
+then echo "PASS replay keeps live wall time"; else echo "FAIL replay"; fail=1; fi
 exit $fail
