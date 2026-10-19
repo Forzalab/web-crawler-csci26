@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests/report/run.sh [BIN] - offline check of `wc --report` (WC_FIXTURE fake web, no network).
 # Crawls tests/crawl/inputfile9 BFS + DFS into a temp dir; checks stats.json fields,
-# histogram sums to nodes, failures.tsv rows == failed, graph.json is BRIDGES JSON.
+# histogram sums to nodes, failures.tsv rows == failed, graph.json is BRIDGES JSON,
+# summary.pdf is a whole PDF (header, %%EOF, startxref -> xref; pdftotext shows host + nodes if installed).
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 BIN=${1:-build/wc}
@@ -31,6 +32,14 @@ assert all(r.split("\t")[3] == "dead" for r in rows[1:]), rows
 g = json.load(open(out + "/graph.json"))
 assert g["visual"] == "GraphAdjacencyList" and len(g["nodes"]) == s["nodes"], "graph.json"
 assert f"nodes={s['nodes']}" in line and out in line, line
+pdf = open(out + "/summary.pdf", "rb").read()
+assert pdf.startswith(b"%PDF-1.") and pdf.rstrip().endswith(b"%%EOF"), "summary.pdf header/EOF"
+x = int(pdf[pdf.rindex(b"startxref") + 9:].split()[0])
+assert pdf[x:x + 4] == b"xref", "startxref does not point at xref"
+import shutil, subprocess
+if shutil.which("pdftotext"):
+    t = subprocess.run(["pdftotext", "-layout", out + "/summary.pdf", "-"], capture_output=True, text=True, check=True).stdout
+    assert f"A - {mode.upper()} crawl" in t and str(s["nodes"]) in t, t
 PY
     then echo "PASS $mode: $line"; else echo "FAIL $mode"; fail=1; fi
 done

@@ -79,6 +79,7 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 ```
 
 - Cache is on: a rerun replays from `.wc-cache/` and never touches the site. `--offline` = cache only.
+- Lost or old `summary.pdf`? `./a.out --report URL --bfs --offline` replays the crawl from the cache and writes all files again, PDF included.
 - `--upload` posts `graph.json` through the gateway (needs `WC_GATEWAY_URL`, like `/bridges`) and writes `bridges_url.txt`.
 - stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
 - `WC_FIXTURE=file` crawls a fake web instead (`tests/report/run.sh`, offline, in `make test` and CI).
@@ -90,6 +91,7 @@ Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
 | `stats.json` | url, mode, depth, size, nodes, edges, fetches, failed, blocked (+ `blocked_by` robots / 429 / bot-wall), depth_histogram (sums to nodes), wall_ms, cache hits / misses, started_at |
 | `failures.tsv` | url, status, error, label: `dead` (404/410/DNS/connect), `robots`, `429`, `redirect-loop`, `tls`, `timeout`, `bot-wall` (403, 202 with no links, JS_SHELL), `other` |
 | `graph.json` | `bridges_json(bridges_subset(g))`: at most 1000 nodes, BRIDGES GraphAdjacencyList |
+| `summary.pdf` | one printable page (US Letter): title, settings, stats, depth histogram (BRIDGES colours), failure labels + first 12 failures, BRIDGES link. Own tiny PDF writer (`src/ui/report_pdf.cc`), no dependencies |
 | `bridges_url.txt` | `--upload` only: the BRIDGES link |
 
 The 10 report crawls (5 sites x BFS / DFS, spec defaults depth 3, size 1000):
