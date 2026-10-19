@@ -50,8 +50,8 @@ ReplayPlan replay_plan(const CrawlGraph& g, ReplayTiming t) {
         const double gap = sum_m > 0 ? std::max(0.0, t.budget_ms - nlev * E) / sum_m : 0.0;
         std::vector<double> T(M.size(), 0.0);  // level start: the previous level has landed
         for (size_t L = 1; L < M.size(); ++L) T[L] = T[L - 1] + (M[L - 1] > 0 ? M[L - 1] * gap + E : 0.0);
-        // Hybrid: fetch order survives inside a level (the trie sweep), fetch rank over the first
-        // half of the level's window, sibling batches over the second; still inside M[L] * gap.
+        // Hybrid: fetch order survives inside a level (the trie sweep). Fetch r of n owns slot r of
+        // the level's window M[L] * gap cut in n; its sibling batches spread inside the slot.
         std::vector<int> rank(g.fetches.size(), 0), per_level(M.size(), 0);
         if (g.mode == Mode::Hybrid)
             for (size_t k = 0; k < g.fetches.size(); ++k) {
@@ -64,7 +64,7 @@ ReplayPlan replay_plan(const CrawlGraph& g, ReplayTiming t) {
             if (fetch[i] < 0) continue;
             const size_t L = size_t(level(i));
             if (g.mode == Mode::Hybrid && per_level[L] > 0)
-                p.start[i] = T[L] + 0.5 * gap * (M[L] * double(rank[size_t(fetch[i])]) / per_level[L] + sib[i] / batch);
+                p.start[i] = T[L] + gap * (M[L] * double(rank[size_t(fetch[i])]) + sib[i] / batch) / per_level[L];
             else p.start[i] = T[L] + (sib[i] / batch) * gap;
             last = std::max(last, p.start[i] + E);
         }

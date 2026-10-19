@@ -28,7 +28,10 @@ anim::Rgb depth_rgb(int depth, int max_depth) {
     return anim::mix(kLava[i], kLava[i + 1], x - i);
 }
 
-bool no_color() { return std::getenv("NO_COLOR") != nullptr; }
+bool no_color() {
+    static const bool off = std::getenv("NO_COLOR") != nullptr;  // read once: called per edge per frame
+    return off;
+}
 
 ftxui::Color depth_color(int depth, int max_depth, double cool) {
     if (no_color()) return depth_color(depth);
