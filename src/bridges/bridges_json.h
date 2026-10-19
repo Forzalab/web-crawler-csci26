@@ -7,6 +7,7 @@
 // by (source id, target id). Same graph in -> same bytes out.
 #pragma once
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -43,6 +44,9 @@ struct BridgesMeta {
 //        Links: rainbow highway (rainbow_path) thickness 6, red -> violet by hop. Other NEW links:
 //        target depth colour, alpha 0.8, thickness 1.5. SEEN: grey, alpha 0.3, thickness 0.5.
 std::string bridges_json(const CrawlGraph& g, const BridgesMeta& meta = {});
+
+// ROYGBIV node colour by depth (>= 6 stays violet), RGB 0..255. Also the summary.pdf bars.
+std::array<int, 3> hop_rgb(int depth);
 
 // Per node id: in-links (edges in, self-loops not counted).
 std::vector<int> in_links(const CrawlGraph& g);

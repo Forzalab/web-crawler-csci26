@@ -80,6 +80,7 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 
 - A bare domain works (`--report espn.com`, also `--links` and the TUI): `https://` is tried first, and only if that start fetch gets no HTTP answer (TLS, CONNECT, DNS, TIMEOUT, IO) it switches to `http://` (`pick_start()`). A 404 or 403 is an answer and stays https; a typed `http://` or `https://` is never changed. Fixture and `--offline` runs skip the probe.
 - Cache is on: a rerun replays from `.wc-cache/` and never touches the site. `--offline` = cache only.
+- Lost or old `summary.pdf`? `./a.out --report URL --bfs --offline` replays the crawl from the cache and writes all files again, PDF included.
 - `--upload` posts `graph.json` through the gateway (needs `WC_GATEWAY_URL`, like `/bridges`) and writes `bridges_url.txt`.
 - stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
 - `WC_FIXTURE=file` crawls a fake web instead (`tests/report/run.sh`, offline, in `make test` and CI).
@@ -88,9 +89,10 @@ Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
 
 | File | What |
 |---|---|
-| `stats.json` | url, mode, depth, size, nodes, edges, fetches, failed, blocked (+ `blocked_by` robots / 429 / bot-wall), depth_histogram (sums to nodes), wall_ms, cache hits / misses, started_at |
+| `stats.json` | url, mode, depth, size, nodes, edges, fetches, failed, blocked (+ `blocked_by` robots / 429 / bot-wall), depth_histogram (sums to nodes), wall_ms, cache hits / misses, started_at, replay (`--offline`), wall_source. A replay over a live run keeps the live wall_ms + started_at (`wall_source: live`; PDF says "live run, <start>"); with no live stats it is `replay` ("cache replay, not live") |
 | `failures.tsv` | url, status, error, label: `dead` (404/410/DNS/connect), `robots`, `429`, `redirect-loop`, `tls`, `timeout`, `bot-wall` (403, 202 with no links, JS_SHELL), `other` |
 | `graph.json` | `bridges_json(bridges_subset(g))`: at most 1000 nodes, BRIDGES GraphAdjacencyList |
+| `summary.pdf` | one printable page (US Letter): title, settings, stats, depth histogram (BRIDGES colours), failure labels + first 12 failures, BRIDGES link. Own tiny PDF writer (`src/ui/report_pdf.cc`), no dependencies |
 | `bridges_url.txt` | `--upload` only: the BRIDGES link |
 
 The 10 report crawls (5 sites x BFS / DFS; `--size` defaults to 50 like the TUI prompt, so these need `--size 1000` explicitly; depth 3 is the default):
