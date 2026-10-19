@@ -75,12 +75,13 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 (our fetcher + `.wc-cache/` + robots.txt + honest UA), but the spec path: sequential `crawl()`, 0.1 s sleep between requests.
 
 ```sh
-./a.out --report URL [--bfs|--dfs] [--depth 3] [--size 1000] [--out DIR] [--cache DIR] [--offline] [--upload]
+./a.out --report URL [--bfs|--dfs] [--depth 3] [--size 1000] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]
 ```
 
 - Cache is on: a rerun replays from `.wc-cache/` and never touches the site. `--offline` = cache only.
 - Lost or old `summary.pdf`? `./a.out --report URL --bfs --offline` replays the crawl from the cache and writes all files again, PDF included.
 - `--upload` posts `graph.json` through the gateway (needs `WC_GATEWAY_URL`, like `/bridges`) and writes `bridges_url.txt`.
+- `--pdf-link` posts `summary.pdf` to the gateway's `/api/pdf` and prints `PDF (24 h): <url>` on its own stdout line: opens in any browser, no scp. The link works for 24 h, then answers 410 (stored copy deleted by a daily sweep, so at most ~48 h on the server). Endpoint: `WC_PDF_URL`, else `WC_GATEWAY_URL` with `/api/bridges` -> `/api/pdf`; `WC_GATEWAY_TOKEN` as for `--upload`. Upload fails -> warning, exit 1, local PDF kept. Expired? `./a.out --report URL --bfs --offline --pdf-link` replays from the cache and shares a fresh link.
 - stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
 - `WC_FIXTURE=file` crawls a fake web instead (`tests/report/run.sh`, offline, in `make test` and CI).
 
@@ -93,6 +94,7 @@ Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
 | `graph.json` | `bridges_json(bridges_subset(g))`: at most 1000 nodes, BRIDGES GraphAdjacencyList |
 | `summary.pdf` | one printable page (US Letter): title, settings, stats, depth histogram (BRIDGES colours), failure labels + first 12 failures, BRIDGES link. Own tiny PDF writer (`src/ui/report_pdf.cc`), no dependencies |
 | `bridges_url.txt` | `--upload` only: the BRIDGES link |
+| `pdf_url.txt` | `--pdf-link` only: the 24 h PDF link |
 
 The 10 report crawls (5 sites x BFS / DFS, spec defaults depth 3, size 1000):
 

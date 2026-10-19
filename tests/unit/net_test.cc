@@ -602,6 +602,30 @@ static void test_gateway() {
     CHECK_EQ(down.error.rfind("connect:", 0), size_t(0));
 }
 
+static void test_pdf_upload() {
+    CHECK_EQ(pdf_endpoint("https://x.dev/p", "https://gw.app/api/bridges"), std::string("https://x.dev/p"));
+    CHECK_EQ(pdf_endpoint(nullptr, "https://gw.app/api/bridges/"), std::string("https://gw.app/api/pdf"));
+    CHECK_EQ(pdf_endpoint("", "https://gw.app/"), std::string(""));
+    CHECK_EQ(pdf_endpoint(nullptr, nullptr), std::string(""));
+    const std::string pdf = std::string("%PDF-1.4\n\0\xff binary\n%%EOF\n", 25);
+    HttpClient http;
+    FakeGateway gw({http_reply(200, R"({"ok":true,"url":"https://gw.app/api/pdf?id=1-ab","expires_at":"2026-10-20T02:00:00.000Z"})"),
+                    http_reply(400, R"({"ok":false,"error":"body is not a PDF"})")});
+    const std::string ep = "http://127.0.0.1:" + std::to_string(gw.port) + "/api/pdf";
+    GatewayReply r = pdf_upload(http, ep, pdf, "www.iana.org-bfs", "tok");
+    CHECK_EQ(r.error, std::string(""));
+    CHECK_EQ(r.url, std::string("https://gw.app/api/pdf?id=1-ab"));
+    CHECK_EQ(r.expires_at, std::string("2026-10-20T02:00:00.000Z"));
+    r = pdf_upload(http, ep, "nope", "a b/c");
+    CHECK_EQ(r.error, std::string("body is not a PDF"));
+    const std::string& q = gw.wait().at(0);
+    CHECK_EQ(q.rfind("POST /api/pdf?name=www.iana.org-bfs HTTP/1.1\r\n", 0), size_t(0));
+    CHECK_EQ(q.find("\r\nContent-Type: application/pdf\r\n") != std::string::npos, true);
+    CHECK_EQ(q.find("\r\nX-Gateway-Token: tok\r\n") != std::string::npos, true);
+    CHECK_EQ(q.substr(q.find("\r\n\r\n") + 4), pdf);
+    CHECK_EQ(gw.requests.at(1).rfind("POST /api/pdf?name=a_b_c ", 0), size_t(0));
+}
+
 int main() {
     test_parse();
     test_resolve();
@@ -615,6 +639,7 @@ int main() {
     test_parallel_fetch();
     test_cache_parallel();
     test_gateway();
+    test_pdf_upload();
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }
