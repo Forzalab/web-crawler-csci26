@@ -17,8 +17,6 @@
 #include <map>
 #include <random>
 
-#include <unistd.h>
-
 #include "adapters/josh_fetcher.h"
 #include "bridges/bridges_json.h"
 #include "core/crawl.h"
@@ -115,6 +113,11 @@ std::string utc(std::time_t t, const char* fmt) {
     return buf;
 }
 
+std::string slurp(const std::string& path) {  // "" if missing
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
 // A live run's wall time + start, kept by --offline replays (the report wants the live numbers).
 // From DIR/stats.json when it holds live numbers: written by a live run, or carried by an earlier replay.
 struct LiveTimes {
@@ -122,8 +125,7 @@ struct LiveTimes {
     std::time_t started = 0;
 };
 LiveTimes live_times(const std::string& stats_path) {
-    std::ifstream in(stats_path);
-    std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::string s = slurp(stats_path);
     LiveTimes t;
     const bool replay = s.find("\"replay\": true") != std::string::npos;
     size_t w = s.find("\"wall_ms\": ");
@@ -134,10 +136,6 @@ LiveTimes live_times(const std::string& stats_path) {
     t.wall_ms = std::atol(s.c_str() + w + 11);
     return t;
 }
-
-#ifndef WC_GIT_SHA
-#define WC_GIT_SHA ""
-#endif
 
 }  // namespace
 
@@ -255,27 +253,13 @@ int report_main(int argc, char** argv) {
     auto u = parse_url(url);
     sum.host = u && !u->host.empty() ? u->host : url;
     sum.mode = to_string(cfg.mode), sum.url = url;
-    sum.started_utc = utc(started, "%Y-%m-%d %H:%M UTC"), sum.started_pt = pacific_time(started);
-    char host[256] = "";
-    gethostname(host, sizeof host - 1);
-    sum.machine = host, sum.bridges_url = link, sum.git_sha = WC_GIT_SHA;
     sum.depth = cfg.maxDepth, sum.size = cfg.maxSize, sum.nodes = int(g.nodes.size()), sum.edges = int(g.edges.size());
     sum.fetches = int(g.fetches.size()), sum.failed = failed, sum.blocked = blocked;
     sum.robots = blocked_by["robots"], sum.too_many = blocked_by["429"], sum.bot_wall = blocked_by["bot-wall"];
     sum.cache_hits = hits, sum.cache_misses = misses, sum.wall_ms = wall_ms;
-    if (carried) sum.wall_note = "(live run, " + sum.started_utc + ")";
+    if (carried) sum.wall_note = "(live run, " + utc(started, "%Y-%m-%d %H:%M UTC") + ")";
     else if (offline) sum.wall_note = "(cache replay, not live)";
-    sum.depth_hist.assign(size_t(cfg.maxDepth) + 1, 0);
-    for (const auto& [d, n] : hist) {
-        if (d >= int(sum.depth_hist.size())) sum.depth_hist.resize(size_t(d) + 1, 0);
-        sum.depth_hist[size_t(d)] = n;
-    }
-    for (const char* k : {"dead", "robots", "429", "redirect-loop", "tls", "timeout", "bot-wall", "other"}) sum.labels.push_back({k, 0});
-    for (const Outcome& o : tap.log) {
-        if (o.kind.empty()) continue;
-        for (auto& [k, n] : sum.labels) n += k == o.kind;
-        sum.failures.push_back({o.url, o.status, o.kind});
-    }
+    sum.bridges_jpg = slurp(out + "/bridges.jpg"), sum.app_jpg = slurp(out + "/app.jpg");  // scripts/report_shots.sh
     std::ofstream(out + "/summary.pdf", std::ios::binary) << summary_pdf(sum);
 
     std::cout << "report " << to_string(cfg.mode) << ' ' << url << " depth=" << cfg.maxDepth << " size=" << cfg.maxSize

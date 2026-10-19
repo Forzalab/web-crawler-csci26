@@ -1,8 +1,9 @@
 // report_pdf_test.cc - unit tests for src/ui/report_pdf (summary.pdf writer). No network.
-// Run: build/wc_report_pdf_test [OUT.pdf]   (exit 1 if any check fails)
-// OUT.pdf: also writes the rehearsal-sized sample (1000 nodes, 177 failures) for a render check.
+// Run: build/wc_report_pdf_test [OUT.pdf [BRIDGES.jpg APP.jpg]]   (exit 1 if any check fails)
+// OUT.pdf: also writes the rehearsal-sized sample for a render check (with the two JPEGs if given).
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 
 #include "ui/report_pdf.h"
@@ -24,25 +25,31 @@ static int failures = 0, checks = 0;
     } while (0)
 #define CHECK(c) CHECK_EQ(bool(c), true)
 
-// Like the en.wikipedia.org BFS rehearsal: 1000 nodes, 177 failures, long URLs.
+// Like the en.wikipedia.org BFS rehearsal.
 static ReportSummary rehearsal() {
     ReportSummary r;
     r.host = "en.wikipedia.org", r.mode = "BFS", r.url = "https://en.wikipedia.org/wiki/Wars_of_the_Roses";
-    r.started_utc = "2026-10-19 01:59 UTC", r.started_pt = "2026-10-18 18:59 PDT", r.machine = "kerney-box";
-    r.git_sha = "e19bbe7";
     r.depth = 3, r.size = 1000, r.nodes = 1000, r.edges = 49329, r.fetches = 1000, r.failed = 177;
     r.blocked = 175, r.robots = 122, r.bot_wall = 53, r.cache_misses = 1000, r.wall_ms = 562702;
-    r.depth_hist = {1, 999, 0, 0};
-    r.labels = {{"dead", 2}, {"robots", 122}, {"429", 0}, {"redirect-loop", 0},
-                {"tls", 0},  {"timeout", 0},  {"bot-wall", 53}, {"other", 0}};
-    for (int i = 0; i < 177; ++i)
-        r.failures.push_back({"https://en.wikipedia.org/w/index.php?title=Special:WhatLinksHere/Wars_of_the_Roses_(" +
-                                  std::to_string(i) + ")&limit=500&namespace=0&hidelinks=1&hidetrans=1",
-                              i < 122 ? 0 : 403, i < 122 ? "robots" : "bot-wall"});
     return r;
 }
 
-// Structure: header, every xref offset points at "N 0 obj", startxref points at "xref", ends %%EOF.
+// SOI, APP0 (16 bytes), SOF0 32x16 RGB, EOI: enough for jpeg_info and the PDF (no viewer needs to decode it).
+static std::string tiny_jpeg(int comps = 3) {
+    std::string j = "\xFF\xD8\xFF\xE0";
+    j += std::string("\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00", 16);
+    j += std::string("\xFF\xC0\x00\x11\x08\x00\x10\x00\x20", 9) + char(comps);
+    j += std::string(9, '\x01') + "\xFF\xD9";
+    return j;
+}
+
+static std::string slurp(const char* path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// Structure: header, every xref offset points at "N 0 obj", startxref points at "xref", ends %%EOF,
+// every stream's /Length matches its bytes.
 static void check_structure(const std::string& pdf) {
     CHECK_EQ(pdf.substr(0, 9), std::string("%PDF-1.4\n"));
     CHECK_EQ(pdf.substr(pdf.size() - 6), std::string("%%EOF\n"));
@@ -59,11 +66,12 @@ static void check_structure(const std::string& pdf) {
         CHECK_EQ(pdf.substr(off, std::to_string(i).size() + 6), std::to_string(i) + " 0 obj");
     }
     CHECK_EQ(pdf.substr(p, 7), std::string("trailer"));
-    // /Length matches the stream bytes.
-    size_t ls = pdf.find("/Length ");
-    size_t len = std::stoul(pdf.substr(ls + 8));
-    size_t s = pdf.find("stream\n", ls) + 7;
-    CHECK_EQ(pdf.substr(s + len, 9), std::string("endstream"));
+    for (size_t ls = pdf.find("/Length "); ls != std::string::npos && ls < xref; ls = pdf.find("/Length ", ls + 1)) {
+        size_t len = std::stoul(pdf.substr(ls + 8));
+        size_t s = pdf.find("stream\n", ls) + 7;
+        const std::string after = pdf.substr(s + len, 10);  // "endstream" or "\nendstream" (EOL before it is allowed)
+        CHECK(after.rfind("endstream", 0) == 0 || after == "\nendstream");
+    }
 }
 
 int main(int argc, char** argv) {
@@ -73,30 +81,48 @@ int main(int argc, char** argv) {
     CHECK_EQ(clip("abcdefg", 6), std::string("abc..."));
     CHECK_EQ(wall_time(12345), std::string("12.3 s"));
     CHECK_EQ(wall_time(562702), std::string("9:22"));
-    CHECK_EQ(pacific_time(1792375145), std::string("2026-10-18 18:59 PDT"));  // 2026-10-19T01:59:05Z
-    CHECK_EQ(pacific_time(1794128400), std::string("2026-11-08 01:00 PST"));  // 2026-11-08T09:00Z (Nov 1st Sunday = 1st)
-    CHECK_EQ(pacific_time(1772964000), std::string("2026-03-08 03:00 PDT"));  // 2026-03-08T10:00Z (2nd Sunday)
+
+    int w = 0, h = 0, c = 0;
+    CHECK(jpeg_info(tiny_jpeg(), w, h, c));
+    CHECK_EQ(w, 32);
+    CHECK_EQ(h, 16);
+    CHECK_EQ(c, 3);
+    CHECK(!jpeg_info("\x89PNG\r\n", w, h, c));
+    CHECK(!jpeg_info(tiny_jpeg(4), w, h, c));  // CMYK: not embedded
+    CHECK(!jpeg_info("", w, h, c));
 
     ReportSummary r = rehearsal();
-    std::string pdf = summary_pdf(r);
+    std::string pdf = summary_pdf(r);  // no pictures
     check_structure(pdf);
-    CHECK(pdf.find("(en.wikipedia.org - BFS crawl)") != std::string::npos);
-    CHECK(pdf.find("Wars_of_the_Roses_\\(0\\)") != std::string::npos);  // escaped, then clipped
-    CHECK(pdf.find("... 165 more in failures.tsv") != std::string::npos);
-    CHECK(pdf.find("not uploaded") != std::string::npos);
-    CHECK(pdf.find("/Annots") == std::string::npos);
-    CHECK(pdf.find("1.00 0.00 0.00 rg") != std::string::npos);  // d0 bar red
+    CHECK(pdf.find("(en.wikipedia.org)") != std::string::npos);
+    CHECK(pdf.find("(BFS crawl, depth 3, size 1000)") != std::string::npos);
+    CHECK(pdf.find("(no screenshot \\(scripts/report_shots.sh\\))") != std::string::npos);
+    CHECK(pdf.find("/XObject") == std::string::npos);
 
-    ReportSummary up = r;
-    up.bridges_url = "https://bridges-cs.herokuapp.com/assignments/1234567/tony";
-    std::string pdf2 = summary_pdf(up);
+    ReportSummary pics = r;
+    pics.bridges_jpg = tiny_jpeg(), pics.app_jpg = tiny_jpeg(1);
+    std::string pdf2 = summary_pdf(pics);
     check_structure(pdf2);
-    CHECK(pdf2.find("/URI (https://bridges-cs.herokuapp.com/assignments/1234567/tony)") != std::string::npos);
+    CHECK(pdf2.find("/XObject << /Im1 8 0 R /Im2 9 0 R >>") != std::string::npos);
+    CHECK(pdf2.find("/Width 32 /Height 16 /ColorSpace /DeviceRGB") != std::string::npos);
+    CHECK(pdf2.find("/ColorSpace /DeviceGray") != std::string::npos);
+    CHECK(pdf2.find("/Im2 Do") != std::string::npos);
+    CHECK(pdf2.find("no screenshot") == std::string::npos);
 
-    ReportSummary empty;
-    check_structure(summary_pdf(empty));
+    ReportSummary half = r;
+    half.app_jpg = tiny_jpeg();  // only our app: one image, BRIDGES box says why
+    std::string pdf3 = summary_pdf(half);
+    check_structure(pdf3);
+    CHECK(pdf3.find("/XObject << /Im1 8 0 R >>") != std::string::npos);
+    CHECK(pdf3.find("no screenshot") != std::string::npos);
 
-    if (argc > 1) std::ofstream(argv[1], std::ios::binary) << pdf;
+    check_structure(summary_pdf(ReportSummary{}));
+
+    if (argc > 1) {
+        ReportSummary out = r;
+        if (argc > 3) out.bridges_jpg = slurp(argv[2]), out.app_jpg = slurp(argv[3]);
+        std::ofstream(argv[1], std::ios::binary) << summary_pdf(out);
+    }
     std::cout << (failures ? "FAILED " : "OK ") << checks - failures << "/" << checks << " checks\n";
     return failures ? 1 : 0;
 }
