@@ -89,7 +89,7 @@ Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
 
 | File | What |
 |---|---|
-| `stats.json` | url, mode, depth, size, nodes, edges, fetches, failed, blocked (+ `blocked_by` robots / 429 / bot-wall), depth_histogram (sums to nodes), wall_ms, cache hits / misses, started_at |
+| `stats.json` | url, mode, depth, size, nodes, edges, fetches, failed, blocked (+ `blocked_by` robots / 429 / bot-wall), depth_histogram (sums to nodes), wall_ms, cache hits / misses, started_at, replay (`--offline`), wall_source. A replay over a live run keeps the live wall_ms + started_at (`wall_source: live`; PDF says "live run, <start>"); with no live stats it is `replay` ("cache replay, not live") |
 | `failures.tsv` | url, status, error, label: `dead` (404/410/DNS/connect), `robots`, `429`, `redirect-loop`, `tls`, `timeout`, `bot-wall` (403, 202 with no links, JS_SHELL), `other` |
 | `graph.json` | `bridges_json(bridges_subset(g))`: at most 1000 nodes, BRIDGES GraphAdjacencyList |
 | `summary.pdf` | one printable page (US Letter): title, settings, stats, depth histogram (BRIDGES colours), failure labels + first 12 failures, BRIDGES link. Own tiny PDF writer (`src/ui/report_pdf.cc`), no dependencies |
