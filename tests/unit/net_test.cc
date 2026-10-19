@@ -72,6 +72,36 @@ static void test_parse() {
     CHECK_EQ(parse_url("https://h:8443/p?q")->target(), std::string("/p?q"));
 }
 
+static void test_with_scheme() {
+    CHECK_EQ(with_scheme("espn.com"), "https://espn.com");
+    CHECK_EQ(with_scheme("  espn.com/a?b "), "https://espn.com/a?b");
+    CHECK_EQ(with_scheme("http://espn.com"), "http://espn.com");
+    CHECK_EQ(with_scheme("https://espn.com"), "https://espn.com");
+    CHECK_EQ(with_scheme("localhost:8080"), "https://localhost:8080");
+    CHECK_EQ(parse_url(with_scheme("espn.com"))->host, "espn.com");
+}
+
+static void test_pick_start() {
+    int calls = 0;
+    auto fail_with = [&](const std::string& error, int status) {
+        return [&calls, error, status](const std::string&) {
+            ++calls;
+            FetchResult r;
+            r.error = error;
+            r.status = status;
+            return r;
+        };
+    };
+    CHECK_EQ(pick_start("espn.com", fail_with("tls: handshake", 0)), "http://espn.com");
+    CHECK_EQ(pick_start("espn.com/a", fail_with("dns: no such host", 0)), "http://espn.com/a");
+    CHECK_EQ(pick_start("espn.com", fail_with("http: 404", 404)), "https://espn.com");
+    CHECK_EQ(pick_start("espn.com", fail_with("", 200)), "https://espn.com");
+    CHECK_EQ(calls, 4);
+    CHECK_EQ(pick_start("http://espn.com", fail_with("tls: x", 0)), "http://espn.com");
+    CHECK_EQ(pick_start("https://espn.com", fail_with("tls: x", 0)), "https://espn.com");
+    CHECK_EQ(calls, 4);  // a typed scheme is never probed
+}
+
 static void test_resolve() {  // RFC 3986 §5.4.1 (fragments dropped on purpose)
     const std::string b = "http://a/b/c/d;p?q";
     const std::map<std::string, std::string> cases = {
@@ -628,6 +658,8 @@ static void test_pdf_upload() {
 
 int main() {
     test_parse();
+    test_with_scheme();
+    test_pick_start();
     test_resolve();
     test_links();
     test_http_parse();

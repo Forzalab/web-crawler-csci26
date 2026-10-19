@@ -75,9 +75,10 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 (our fetcher + `.wc-cache/` + robots.txt + honest UA), but the spec path: sequential `crawl()`, 0.1 s sleep between requests.
 
 ```sh
-./a.out --report URL [--bfs|--dfs] [--depth 3] [--size 1000] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]
+./a.out --report URL [--bfs|--dfs] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]
 ```
 
+- A bare domain works (`--report espn.com`, also `--links` and the TUI): `https://` is tried first, and only if that start fetch gets no HTTP answer (TLS, CONNECT, DNS, TIMEOUT, IO) it switches to `http://` (`pick_start()`). A 404 or 403 is an answer and stays https; a typed `http://` or `https://` is never changed. Fixture and `--offline` runs skip the probe.
 - Cache is on: a rerun replays from `.wc-cache/` and never touches the site. `--offline` = cache only.
 - Lost or old `summary.pdf`? `./a.out --report URL --bfs --offline` replays the crawl from the cache and writes all files again, PDF included.
 - Pictures for the PDF: `scripts/report_shots.sh DIR` (after a `--upload` run). It opens our TUI on the same site from the cache in tmux and screenshots the screen (`app.jpg`), screenshots the BRIDGES page from `bridges_url.txt` (`bridges.jpg`), then rewrites `summary.pdf` by cache replay (live wall time kept). Needs tmux, python3, node + Playwright Chromium (the cloud container has them); a missing one = that box stays empty. Extra flags pass through: `scripts/report_shots.sh DIR --pdf-link`.
@@ -98,19 +99,19 @@ Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
 | `bridges_url.txt` | `--upload` only: the BRIDGES link |
 | `pdf_url.txt` | `--pdf-link` only: the 24 h PDF link |
 
-The 10 report crawls (5 sites x BFS / DFS, spec defaults depth 3, size 1000):
+The 10 report crawls (5 sites x BFS / DFS; `--size` defaults to 50 like the TUI prompt, so these need `--size 1000` explicitly; depth 3 is the default):
 
 ```sh
-./a.out --report https://en.wikipedia.org/wiki/Wars_of_the_Roses --bfs
-./a.out --report https://en.wikipedia.org/wiki/Wars_of_the_Roses --dfs
-./a.out --report "https://www.google.com/search?q=wars+of+the+roses" --bfs
-./a.out --report "https://www.google.com/search?q=wars+of+the+roses" --dfs
-./a.out --report https://www.espn.com/ --bfs
-./a.out --report https://www.espn.com/ --dfs
-./a.out --report https://wowcubedocs.com/ --bfs
-./a.out --report https://wowcubedocs.com/ --dfs
-./a.out --report https://dwarfdig.com/ --bfs
-./a.out --report https://dwarfdig.com/ --dfs
+./a.out --report https://en.wikipedia.org/wiki/Wars_of_the_Roses --bfs --size 1000
+./a.out --report https://en.wikipedia.org/wiki/Wars_of_the_Roses --dfs --size 1000
+./a.out --report "https://www.google.com/search?q=wars+of+the+roses" --bfs --size 1000
+./a.out --report "https://www.google.com/search?q=wars+of+the+roses" --dfs --size 1000
+./a.out --report https://www.espn.com/ --bfs --size 1000
+./a.out --report https://www.espn.com/ --dfs --size 1000
+./a.out --report https://wowcubedocs.com/ --bfs --size 1000
+./a.out --report https://wowcubedocs.com/ --dfs --size 1000
+./a.out --report https://dwarfdig.com/ --bfs --size 1000
+./a.out --report https://dwarfdig.com/ --dfs --size 1000
 ```
 
 Polite only: robots.txt is obeyed and bot walls are reported (`blocked`), never worked around.
