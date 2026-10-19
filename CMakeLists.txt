@@ -94,6 +94,7 @@ add_executable(wc
   src/ui/fixture_source.cc
   src/ui/term_lock.cc             # one bracketed write per frame (no tearing)
   src/ui/links_main.cc
+  src/ui/report_main.cc            # --report URL (headless report crawls)
   src/ui/matrix_demo.cc            # WC_MATRIX_DEMO=1 (hidden)
   src/adapters/josh_fetcher.cc
   src/adapters/logan_renderer.cc

@@ -25,6 +25,9 @@ compile_commands.json
 # Fetch cache (wc --cache DIR, default .wc-cache)
 .wc-cache/
 
+# Report crawl run dirs (wc --report, default runs/<host>-<mode>/)
+runs/
+
 # Test runner temp file
 THIS_IS_YOUR_OUTPUT
 
