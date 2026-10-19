@@ -5,7 +5,8 @@
 //
 // Level of detail, highways first (like a map): tree edges into big subtrees
 // draw before small ones, SEEN back-links only once every visible tree edge
-// fits the budget, which grows with screen size and zoom.
+// fits the budget (and then only kSeenShare of what is left), which grows with
+// screen size and zoom in (zoom out keeps the fit budget).
 #pragma once
 
 #include <string>
@@ -17,7 +18,7 @@
 
 namespace wc {
 
-// >= kClusterMin kids of one site under a parent of another site fold into one
+// >= kClusterMin kids of one site (Layout::site) under a parent of another site fold into one
 // glyph + "site ×count" while zoomed out (zoom < kClusterZoom).
 constexpr int kClusterMin = 6;
 constexpr double kClusterZoom = 2;
@@ -48,8 +49,11 @@ struct Scene {
 Scene make_scene(const CrawlGraph& g);
 Scene make_scene(const CrawlGraph& g, Layout lay);  // given layout (tests)
 
-// Edges drawn past n_always: max(24, cols*rows/40) * clamp(zoom, 0.25, 16). cols x rows = canvas cells.
+// Edges drawn past n_always: max(24, cols*rows/40) * clamp(zoom, 1, 16). cols x rows = canvas cells.
+// Zooming out never shrinks it: edges get shorter, the screen holds more of them.
 int lod_budget(int cols, int rows, double zoom);
+// SEEN back-links get this share of the budget the tree edges left (grey edges stay sparse).
+constexpr double kSeenShare = 0.5;
 // Deepest labelled depth: < 2.5 -> 1, < 5 -> 2, else every depth.
 int lod_label_depth(double zoom);
 

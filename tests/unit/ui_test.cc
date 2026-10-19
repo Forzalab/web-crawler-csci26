@@ -388,6 +388,30 @@ static void test_sites() {
     CHECK_EQ(l.shape[3], 0);  // subdomain shares the shape
     CHECK_EQ(l.shape[1], 1);  // b.org: 2 nodes, seen second
     CHECK_EQ(l.shape[4], 2);
+    CHECK_EQ(l.site[3], std::string("a.org"));  // 3 sites: keys stay site_of()
+    CHECK_EQ(l.site[1], std::string("b.org"));
+}
+
+// One domain, 3 subdomains (< kMinSites sites): keys become hosts, so 3 shapes and per-host clusters.
+static void test_subdomain_sites() {
+    CrawlGraph g;
+    g.add_node("https://en.wikipedia.org/", 0);
+    for (const char* h : {"de", "fr"})
+        for (int i = 0; i < 7; ++i) {
+            g.add_node("https://" + std::string(h) + ".wikipedia.org/" + std::to_string(i), 1);
+            g.add_edge(g.nodes[0].url, g.nodes.back().url, false);
+        }
+    Layout l = radial_layout(g);
+    CHECK_EQ(l.site[0], std::string("en.wikipedia.org"));
+    CHECK_EQ(l.site[1], std::string("de.wikipedia.org"));
+    CHECK_EQ(l.sites.size(), size_t(3));
+    CHECK_EQ(l.shape[1], 0);  // de: 7 nodes, seen first
+    CHECK_EQ(l.shape[8], 1);  // fr: 7 nodes
+    CHECK_EQ(l.shape[0], 2);  // en: the root alone
+    Scene s = make_scene(g);
+    CHECK_EQ(s.clusters.size(), size_t(2));
+    CHECK_EQ(s.clusters[0].label, std::string("de.wikipedia.org ×7"));
+    CHECK_EQ(s.clusters[1].label, std::string("fr.wikipedia.org ×7"));
 }
 
 // Same-site siblings sit side by side: kids grouped by their site's first appearance.
@@ -444,7 +468,8 @@ static void test_scene_lod() {
     CHECK_EQ(lod_budget(40, 10, 1), 24);  // floor
     CHECK_EQ(lod_budget(200, 60, 1), 300);
     CHECK_EQ(lod_budget(80, 24, 4), 192);
-    CHECK_EQ(lod_budget(200, 60, 0.1), 75);    // zoom clamped to 0.25
+    CHECK_EQ(lod_budget(200, 60, 0.1), 300);   // zoom out never shrinks it
+    CHECK_EQ(lod_budget(200, 60, 0.5), 300);
     CHECK_EQ(lod_budget(200, 60, 32), 4800);   // ... and to 16
     CHECK_EQ(lod_label_depth(1), 1);
     CHECK_EQ(lod_label_depth(2.49), 1);
@@ -546,6 +571,7 @@ int main() {
     test_progress();
     test_loading_line();
     test_sites();
+    test_subdomain_sites();
     test_layout();
     test_layout_site_groups();
     test_scene_lod();
