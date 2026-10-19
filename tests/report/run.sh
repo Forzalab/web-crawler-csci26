@@ -39,7 +39,7 @@ assert pdf[x:x + 4] == b"xref", "startxref does not point at xref"
 import shutil, subprocess
 if shutil.which("pdftotext"):
     t = subprocess.run(["pdftotext", "-layout", out + "/summary.pdf", "-"], capture_output=True, text=True, check=True).stdout
-    assert f"A - {mode.upper()} crawl" in t and str(s["nodes"]) in t, t
+    assert f"{mode.upper()} crawl, depth 5, size 10" in t and str(s["nodes"]) in t and "no screenshot" in t, t
 PY
     then echo "PASS $mode: $line"; else echo "FAIL $mode"; fail=1; fi
 done
@@ -50,6 +50,10 @@ fx() { WC_FIXTURE=tests/crawl/inputfile9 "$BIN" --report A --bfs --depth 5 --siz
 fx "$tmp/rp"
 sed -i 's/"wall_ms": [0-9]*/"wall_ms": 110300/; s/"started_at": "[^"]*"/"started_at": "2026-10-19T01:59:05Z"/' "$tmp/rp/stats.json"
 fx "$tmp/rp" --offline && fx "$tmp/rp" --offline && fx "$tmp/fresh" --offline
+# app.jpg / bridges.jpg in the run dir (scripts/report_shots.sh) go into summary.pdf as images.
+python3 -c 'import sys; open(sys.argv[1], "wb").write(b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x10\x00\x20\x03" + b"\x01" * 9 + b"\xff\xd9")' "$tmp/fresh/app.jpg"
+cp "$tmp/fresh/app.jpg" "$tmp/fresh/bridges.jpg"
+fx "$tmp/fresh" --offline
 if python3 - "$tmp" <<'PY2'
 import json, shutil, subprocess, sys
 t = sys.argv[1]
@@ -62,6 +66,7 @@ if shutil.which("pdftotext"):
     txt = lambda d: subprocess.run(["pdftotext", t + d + "/summary.pdf", "-"], capture_output=True, text=True).stdout
     assert "1:50" in txt("/rp") and "live run, 2026-10-19 01:59 UTC" in txt("/rp"), txt("/rp")
     assert "cache replay, not live" in txt("/fresh"), txt("/fresh")
+assert open(t + "/fresh/summary.pdf", "rb").read().count(b"/Subtype /Image") == 2, "2 images in summary.pdf"
 PY2
-then echo "PASS replay keeps live wall time"; else echo "FAIL replay"; fail=1; fi
+then echo "PASS replay keeps live wall time; screenshots embedded"; else echo "FAIL replay"; fail=1; fi
 exit $fail

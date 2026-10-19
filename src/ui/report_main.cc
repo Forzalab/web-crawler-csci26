@@ -3,9 +3,11 @@
 // sequential crawl() with a real 0.1 s sleep between requests. Cache on, so a rerun replays.
 //   --bfs | --dfs   --depth N (3)   --size N (1000)   --out DIR (runs/<host>-<bfs|dfs>/)
 //   --cache DIR (.wc-cache)   --offline (cache only)   --upload (needs WC_GATEWAY_URL)
+//   --pdf-link: share summary.pdf for 24 h via the gateway (WC_PDF_URL, else WC_GATEWAY_URL)
 // WC_FIXTURE=file: fake web instead of the network (tests/report/), no sleeps.
-// Writes DIR/stats.json, DIR/failures.tsv, DIR/graph.json, DIR/summary.pdf (+ DIR/bridges_url.txt on --upload).
-// stdout: one summary line. stderr: one line per fetch.
+// Writes DIR/stats.json, DIR/failures.tsv, DIR/graph.json, DIR/summary.pdf (+ DIR/bridges_url.txt on --upload,
+// DIR/pdf_url.txt on --pdf-link).
+// stdout: one summary line (+ "PDF (24 h): <url>" on --pdf-link). stderr: one line per fetch.
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -16,8 +18,6 @@
 #include <iostream>
 #include <map>
 #include <random>
-
-#include <unistd.h>
 
 #include "adapters/josh_fetcher.h"
 #include "bridges/bridges_json.h"
@@ -115,6 +115,11 @@ std::string utc(std::time_t t, const char* fmt) {
     return buf;
 }
 
+std::string slurp(const std::string& path) {  // "" if missing
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
 // A live run's wall time + start, kept by --offline replays (the report wants the live numbers).
 // From DIR/stats.json when it holds live numbers: written by a live run, or carried by an earlier replay.
 struct LiveTimes {
@@ -122,8 +127,7 @@ struct LiveTimes {
     std::time_t started = 0;
 };
 LiveTimes live_times(const std::string& stats_path) {
-    std::ifstream in(stats_path);
-    std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::string s = slurp(stats_path);
     LiveTimes t;
     const bool replay = s.find("\"replay\": true") != std::string::npos;
     size_t w = s.find("\"wall_ms\": ");
@@ -135,10 +139,6 @@ LiveTimes live_times(const std::string& stats_path) {
     return t;
 }
 
-#ifndef WC_GIT_SHA
-#define WC_GIT_SHA ""
-#endif
-
 }  // namespace
 
 int report_main(int argc, char** argv) {
@@ -146,7 +146,7 @@ int report_main(int argc, char** argv) {
     CrawlConfig cfg;
     cfg.maxDepth = kDefaultDepth;
     cfg.maxSize = kDefaultLinks;
-    bool upload = false, offline = false;
+    bool upload = false, offline = false, pdf_link = false;
     for (int i = 1; i < argc; ++i) {
         bool has_arg = i + 1 < argc;
         if (!std::strcmp(argv[i], "--report") && has_arg) url = argv[++i];
@@ -158,9 +158,10 @@ int report_main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--cache") && has_arg) cache_dir = argv[++i];
         else if (!std::strcmp(argv[i], "--upload")) upload = true;
         else if (!std::strcmp(argv[i], "--offline")) offline = true;
+        else if (!std::strcmp(argv[i], "--pdf-link")) pdf_link = true;
     }
     if (url.empty() || cfg.maxDepth < 0 || cfg.maxSize < 1) {
-        std::cerr << "usage: wc --report URL [--bfs|--dfs] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload]\n";
+        std::cerr << "usage: wc --report URL [--bfs|--dfs] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]\n";
         return 2;
     }
     const std::string mode = cfg.mode == Mode::BFS ? "bfs" : "dfs";
@@ -169,6 +170,12 @@ int report_main(int argc, char** argv) {
         std::cerr << "--upload needs WC_GATEWAY_URL\n";
         return 2;
     }
+    const std::string pdf_ep = pdf_endpoint(std::getenv("WC_PDF_URL"), gateway);
+    if (pdf_link && pdf_ep.empty()) {
+        std::cerr << "--pdf-link needs WC_PDF_URL, or WC_GATEWAY_URL ending in /api/bridges\n";
+        return 2;
+    }
+    const char* token = std::getenv("WC_GATEWAY_TOKEN");
 
     JoshFetcher josh;
     HttpsFetcher tls;
@@ -243,9 +250,9 @@ int report_main(int argc, char** argv) {
         HttpOptions opt;
         opt.timeout_ms = 20000;  // the gateway waits up to 15 s for BRIDGES
         HttpClient http(opt);
-        const char *sub = std::getenv("WC_BRIDGES_SUB"), *tok = std::getenv("WC_GATEWAY_TOKEN");
+        const char* sub = std::getenv("WC_BRIDGES_SUB");
         const std::string a = session_assignment(std::getenv("BRIDGES_ASSIGNMENT"), std::random_device{}());
-        GatewayReply r = gateway_upload(http, gateway, a, sub ? std::atoi(sub) : 0, json, tok ? tok : "");
+        GatewayReply r = gateway_upload(http, gateway, a, sub ? std::atoi(sub) : 0, json, token ? token : "");
         if (!r.error.empty()) {
             std::cerr << "BRIDGES: " << r.error << '\n';
         } else {
@@ -258,34 +265,35 @@ int report_main(int argc, char** argv) {
     auto u = parse_url(url);
     sum.host = u && !u->host.empty() ? u->host : url;
     sum.mode = to_string(cfg.mode), sum.url = url;
-    sum.started_utc = utc(started, "%Y-%m-%d %H:%M UTC"), sum.started_pt = pacific_time(started);
-    char host[256] = "";
-    gethostname(host, sizeof host - 1);
-    sum.machine = host, sum.bridges_url = link, sum.git_sha = WC_GIT_SHA;
     sum.depth = cfg.maxDepth, sum.size = cfg.maxSize, sum.nodes = int(g.nodes.size()), sum.edges = int(g.edges.size());
     sum.fetches = int(g.fetches.size()), sum.failed = failed, sum.blocked = blocked;
     sum.robots = blocked_by["robots"], sum.too_many = blocked_by["429"], sum.bot_wall = blocked_by["bot-wall"];
     sum.cache_hits = hits, sum.cache_misses = misses, sum.wall_ms = wall_ms;
-    if (carried) sum.wall_note = "(live run, " + sum.started_utc + ")";
+    if (carried) sum.wall_note = "(live run, " + utc(started, "%Y-%m-%d %H:%M UTC") + ")";
     else if (offline) sum.wall_note = "(cache replay, not live)";
-    sum.depth_hist.assign(size_t(cfg.maxDepth) + 1, 0);
-    for (const auto& [d, n] : hist) {
-        if (d >= int(sum.depth_hist.size())) sum.depth_hist.resize(size_t(d) + 1, 0);
-        sum.depth_hist[size_t(d)] = n;
+    sum.bridges_jpg = slurp(out + "/bridges.jpg"), sum.app_jpg = slurp(out + "/app.jpg");  // scripts/report_shots.sh
+    const std::string pdf = summary_pdf(sum);
+    std::ofstream(out + "/summary.pdf", std::ios::binary) << pdf;
+    std::string pdf_url;
+    if (pdf_link) {
+        HttpOptions opt;
+        opt.timeout_ms = 20000;
+        HttpClient http(opt);
+        GatewayReply r = pdf_upload(http, pdf_ep, pdf, sum.host + "-" + mode, token ? token : "");
+        if (!r.error.empty()) {
+            std::cerr << "PDF link: " << r.error << " (local copy: " << out << "/summary.pdf)\n";
+        } else {
+            pdf_url = r.url;
+            std::ofstream(out + "/pdf_url.txt") << pdf_url << '\n';
+        }
     }
-    for (const char* k : {"dead", "robots", "429", "redirect-loop", "tls", "timeout", "bot-wall", "other"}) sum.labels.push_back({k, 0});
-    for (const Outcome& o : tap.log) {
-        if (o.kind.empty()) continue;
-        for (auto& [k, n] : sum.labels) n += k == o.kind;
-        sum.failures.push_back({o.url, o.status, o.kind});
-    }
-    std::ofstream(out + "/summary.pdf", std::ios::binary) << summary_pdf(sum);
 
     std::cout << "report " << to_string(cfg.mode) << ' ' << url << " depth=" << cfg.maxDepth << " size=" << cfg.maxSize
               << " nodes=" << g.nodes.size() << " edges=" << g.edges.size() << " fetches=" << g.fetches.size()
               << " failed=" << failed << " blocked=" << blocked << " cache=" << hits << '/' << misses << " wall_ms=" << wall_ms
               << " -> " << out << (link.empty() ? "" : " bridges=" + link) << '\n';
-    return upload && link.empty() ? 1 : 0;
+    if (!pdf_url.empty()) std::cout << "PDF (24 h): " << pdf_url << '\n';  // own line: easy to tap / copy
+    return (upload && link.empty()) || (pdf_link && pdf_url.empty()) ? 1 : 0;
 }
 
 }  // namespace wc
