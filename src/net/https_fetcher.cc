@@ -222,6 +222,8 @@ std::optional<std::vector<std::string>> RoutedFetcher::links(const std::string& 
                                       [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; }))
         return tls_.links(url);
     if (auto r = josh_.links(url)) return r;
+    if (stream_)
+        if (auto r = stream_->links(url)) return r;
     return tls_.links(url);
 }
 
