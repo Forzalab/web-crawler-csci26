@@ -3,7 +3,7 @@ BUILD ?= build
 # make V=1 -> show the full compiler log while building
 V ?= 0
 
-.PHONY: all test unit lint clean crawl-regress smoke smoke-offline smoke-live
+.PHONY: all test unit lint clean josh crawl-regress smoke smoke-offline smoke-live
 
 all:
 	@VERBOSE=$(V) scripts/build.sh $(BUILD)
@@ -41,6 +41,11 @@ smoke-offline: all
 
 smoke-live: all
 	BIN=$(BUILD)/wc tests/smoke/run.sh --live $(FILTER)
+
+# Josh's josh_get_links() vs our fetcher, 12 cases (tests/team/). Not part of `make test`.
+josh: all
+	cmake --build $(BUILD) --target josh_test
+	$(BUILD)/josh_test
 
 lint:
 	@scripts/lint.sh
