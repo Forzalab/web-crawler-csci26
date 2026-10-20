@@ -103,6 +103,9 @@ constexpr int kPulseTravelMs = 800;   // a pulse runs a -> b in this long, then 
 constexpr int kPulseLanes = 3;        // most pulses at once (lanes staggered by period / lanes)
 constexpr int kPulseDots = 3;         // pulse length, in dots
 constexpr uint64_t kPulseSkip = 3;    // 1 slot in kPulseSkip stays empty: "sometimes"
+// Volcano replay (graph(), content ms): shockwave per erupting ring, lava cooling per node.
+constexpr double kShockMs = 700;
+constexpr int64_t kCoolMs = 400;
 
 uint64_t pulse_hash(uint64_t slot, uint64_t lane) {  // splitmix64 finaliser
     uint64_t h = slot * 0x9E3779B97F4A7C15ull + (lane + 1) * 0xC2B2AE3D27D4EB4Full;
@@ -144,6 +147,19 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
                             int(std::lround(sy(0) + r * std::sin(a))), true, th::kFaint);
             }
         }
+        // Volcano: a ring starts erupting -> a shockwave rolls out from the ring inside it to its
+        // own radius (ease-out), lava-hot, fading to faint. Past the replay (or --no-anim) none.
+        const bool lava = !th::no_color();
+        for (int d = 1; lava && d < int(scene->ring_start.size()); ++d) {
+            const double st = scene->ring_start[size_t(d)], dt = f.ms - st;
+            if (st < 0 || dt < 0 || dt >= kShockMs) continue;
+            const double k = dt / kShockMs, r = (d - 1 + anim::ease_out(k)) * v.scale;
+            const Color col = th::to_color(anim::mix(th::depth_rgb(d, scene->max_depth), th::rgb::kFaint, k));
+            for (int i = 0, n = int(r * 6); r > 2 && i < n; i += 2) {
+                double a = 2 * M_PI * i / n;
+                c.DrawPoint(int(std::lround(sx(0) + r * std::cos(a))), int(std::lround(sy(0) + r * std::sin(a))), true, col);
+            }
+        }
         // Edges next, so nodes and labels sit on top. Highways first (scene order):
         // tree edges into big subtrees, then SEEN back-links by in-degree, until the
         // budget is spent; edges to depth <= 1 always. Back-links show only once every
@@ -166,8 +182,12 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
             int a = plan.from[e], b = plan.to[e];
             if (t <= 0 || !shown(a) || !shown(b)) continue;
-            Color col = seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth));
+            Color col = seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth), scene->max_depth);
             const bool drew = edge(sx(a), sy(a), sx(b), sy(b), t, col);
+            // Lava bomb: the child flies out from its parent, a white-hot dot at the edge tip.
+            if (lava && drew && !seen && t < 1)
+                c.DrawPoint(int(std::lround(sx(a) + (sx(b) - sx(a)) * t)), int(std::lround(sy(a) + (sy(b) - sy(a)) * t)),
+                            true, th::to_color(th::depth_rgb(0, 1)));
             spent += drew;
             if (seen && drew) ++seen_spent, drawn_seen.push_back(e);
         }
@@ -197,7 +217,7 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             const Cluster& cl = scene->clusters[k];
             if (cl_t[k] <= 0 || !shown(cl.parent)) continue;
             int d = g.nodes[size_t(cl.members[0])].depth;
-            edge(sx(cl.parent), sy(cl.parent), csx(cl), csy(cl), cl_t[k], th::depth_color(std::max(1, d)));
+            edge(sx(cl.parent), sy(cl.parent), csx(cl), csy(cl), cl_t[k], th::depth_color(std::max(1, d), scene->max_depth));
         }
         // Nodes: glyph (+ label down to lod_label_depth), snapped to cells. Labels go in
         // id order (shallow first); one that would overlap a glyph or an
@@ -240,7 +260,10 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             if (!drawn(id)) continue;
             const Node& n = g.nodes[id];
             int x = cx_of(id), y = cy_of(id);
-            Color col = n.status == Status::Failed ? th::kChrome : th::depth_color(n.depth);
+            // Lava cooling: lands white-hot, cools to its ring's colour over kCoolMs.
+            const double landed_at = id < scene->land.size() ? scene->land[id] : -1;
+            const double cool = landed_at < 0 ? 1 : anim::ease_out(anim::ramp(int64_t(f.ms - landed_at), kCoolMs));
+            Color col = n.status == Status::Failed ? th::kChrome : th::depth_color(n.depth, scene->max_depth, cool);
             bool root = id == 0;
             int shape = id < l.shape.size() ? l.shape[id] : -1;
             c.DrawText(x, y, th::glyph(shape, n.status), [col, root](Cell& p) {
@@ -255,7 +278,7 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             if (!landed(k)) continue;
             const Cluster& cl = scene->clusters[k];
             int m = cl.members[0], x = int(std::lround(csx(cl))) / 2 * 2, y = int(std::lround(csy(cl))) / 4 * 4;
-            Color col = th::depth_color(g.nodes[size_t(m)].depth);
+            Color col = th::depth_color(g.nodes[size_t(m)].depth, scene->max_depth);
             c.DrawText(x, y, th::glyph(size_t(m) < l.shape.size() ? l.shape[size_t(m)] : -1, Status::Fetched),
                        [col](Cell& p) {
                            p.foreground_color = col;
@@ -290,8 +313,32 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             if (place(col, row, w, !root)) c.DrawText((col - 1) * 2, row * 4, " " + lab + " ", white(root));
         }
     });
+    // Legend, bottom-left. Colour: one boxed panel, the depth ramp (colour = depth, 0..max under
+    // it) on top, then shape -> site, one per line. NO_COLOR: the old one-row legend (sites only).
+    if (!th::no_color()) {
+        Elements rows;
+        if (scene->max_depth > 0) {
+            Elements ramp, nums;
+            for (int d = 0; d <= scene->max_depth; ++d) {
+                ramp.push_back(text("███") | color(th::depth_color(d, scene->max_depth)));
+                nums.push_back(text(std::to_string(d)) | color(th::kChrome) | size(WIDTH, EQUAL, 3));
+            }
+            rows.push_back(text("depth") | color(th::kChrome));
+            rows.push_back(hbox(std::move(ramp)));
+            rows.push_back(hbox(std::move(nums)));
+        }
+        if (l.sites.size() >= 2) {
+            if (!rows.empty()) rows.push_back(separatorLight() | color(th::kFaint));
+            for (size_t r = 0; r < l.sites.size(); ++r)
+                rows.push_back(hbox({text(th::glyph(int(r), Status::Fetched)) | color(th::kText),
+                                     text(" " + l.sites[r]) | color(th::kChrome)}));
+            rows.push_back(text("· other") | color(th::kChrome));
+        }
+        if (rows.empty()) return cv;
+        Element panel = vbox(std::move(rows)) | borderStyled(ROUNDED, th::kFaint) | clear_under;
+        return dbox({cv, vbox({filler(), hbox({text(" "), std::move(panel), filler()})})});
+    }
     if (l.sites.size() < 2) return cv;
-    // Legend, bottom-left: shape -> site. Shape = site, color = depth.
     Elements legend{text(" ")};
     for (size_t r = 0; r < l.sites.size(); ++r)
         legend.push_back(hbox({text(th::glyph(int(r), Status::Fetched)) | color(th::kText),
@@ -352,7 +399,7 @@ Element omnibar(Element input, const std::vector<std::string>& results, int sele
     // Input never grows (Input is xflex): the ghost sits right after the typed text, not mid-box.
     Elements box = {hbox({text("› ") | bold | color(th::kAccent), std::move(input) | xflex_factor(0, 1), text(first) | color(th::kChrome), filler()})};
     for (size_t p = ghost.find('\n'); p != std::string::npos; p = ghost.find('\n', p + 1))
-        box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome) | dim);
+        box.push_back(text("  " + ghost.substr(p + 1, ghost.find('\n', p + 1) - p - 1)) | color(th::kChrome));
     rows.push_back(input_box(vbox(std::move(box)), border));
     // Centred column, <= 60 cols and <= half the screen; results share it.
     return std::make_shared<CenterCap>(vbox(std::move(rows)), 60);
@@ -388,7 +435,7 @@ Element preview(const std::string& title, const std::vector<std::string>& lines,
     }
     Element content = vbox({
         vbox(std::move(body)) | flex,
-        text("Tab focus · j/k scroll · m max · Esc close") | dim | color(th::kChrome),
+        text("Tab focus · j/k scroll · m max · Esc close") | color(th::kChrome),
     });
     // color() paints the border; every child above sets its own colour on top.
     Element panel = window(text(" PREVIEW · " + title + " ") | bold | color(th::kAccent),
@@ -403,7 +450,7 @@ Element coach(int step, int total, const std::string& t) {
                hbox({text(std::to_string(step) + "/" + std::to_string(total)) | bold |
                          color(th::kAccent),
                      text("  " + t) | color(th::kText)}),
-               text("Tab next · Esc skip") | dim | color(th::kChrome),
+               text("Tab next · Esc skip") | color(th::kChrome),
            }) |
            borderStyled(ROUNDED, th::kFaint) | clear_under;  // opaque over the graph
 }
@@ -452,7 +499,7 @@ Element loading(const LoadingState& s, Element background) {
     // clear_under: the box is opaque, so a background layer (rain) never shows through the text.
     Element box = vbox(std::move(rows)) | size(WIDTH, EQUAL, w) | borderStyled(ROUNDED, edge) | clear_under;
     // Blank top row balances the footer row (same rule as the prompt screens).
-    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc stop · Ctrl-C quit") | color(th::kChrome) | dim)}) | flex;
+    Element content = vbox({text(""), filler(), hcenter(box), filler(), hcenter(text("Esc stop · Ctrl-C quit") | color(th::kChrome))}) | flex;
     return dbox({std::move(background), std::move(content)});
 }
 

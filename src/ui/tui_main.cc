@@ -1,5 +1,5 @@
 // tui_main.cc - interactive front end. One step on screen at a time:
-// URL -> Visualize? -> Mode (BFS / DFS) -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
+// URL -> Visualize? -> Mode (Hybrid / BFS / DFS, Enter = Hybrid) -> Max depth -> Max links -> crawl (live loading screen) -> graph + omnibar.
 // URL step: an invalid URL (valid_start) shows a red line; Enter / Tab do nothing on it.
 // Flags: --no-anim (or NO_COLOR) jumps the replay to the end, no glow, no fades/ramps, no back-link pulses.
 // Focus (ui/focus.h): Tab cycles search bar -> preview (if open) -> graph; Esc steps back.
@@ -10,7 +10,8 @@
 // Enter on a result opens its page preview (cache, else live fetch).
 // Crawl: kWorkers parallel fetches (polite per host). Esc on the loading screen stops it
 // and shows the graph so far; /resume crawls on into the same graph (BFS only).
-// DFS: the spec path, sequential crawl_dfs with the 0.1 s delay.
+// DFS: the spec path, sequential crawl_dfs with the 0.1 s delay. Hybrid: crawl_hybrid (BFS layers,
+// trie order inside a layer), sequential with the 0.1 s delay, Esc stops it like DFS.
 // /bridges uploads the graph through gateway/ when WC_GATEWAY_URL is set (WC_BRIDGES_SUB = 0,
 // WC_GATEWAY_TOKEN optional). Assignment: BRIDGES_ASSIGNMENT, else a random 7-digit id picked
 // once per session. Once uploaded, a finished /resume re-uploads to the same assignment + sub,
@@ -36,6 +37,7 @@
 #include "adapters/josh_fetcher.h"
 #include "bridges/bridges_json.h"
 #include "core/crawl.h"
+#include "core/crawl_hybrid.h"
 #include "net/cache.h"
 #include "net/gateway.h"
 #include "net/https_fetcher.h"
@@ -105,7 +107,7 @@ std::string bridges_url(const std::string& assignment) {
 // The blank top row balances the footer row, so the body is centred on the whole screen.
 Element step_screen(Element body, const std::string& footer) {
     return vbox({text(""), filler(), hcenter(std::move(body)), filler(),
-                 hcenter(text(footer) | color(th::kChrome) | dim)}) |
+                 hcenter(text(footer) | color(th::kChrome))}) |
            flex;
 }
 
@@ -122,6 +124,25 @@ Element url_screen(const std::vector<std::string>& chips, Element input, const s
 
 Element prompt_screen(const std::string& q, Element input, const std::string& footer = "Enter accept default · Esc quit") {
     return step_screen(views::field(q, std::move(input), 8), footer);
+}
+
+// Mode prompt: Hybrid first, in the lava ramp with a slow glow and a "★ recommended" tag;
+// BFS / DFS plain and dim. anim = false (--no-anim / NO_COLOR): no glow. NO_COLOR: no colours.
+Element mode_screen(Element input, bool anim) {
+    const std::string word = "[h]ybrid";
+    const double glow = anim ? 0.5 + 0.5 * std::sin(anim::now_ms() / 1000.0 * 2 * M_PI / 1.6) : 1;
+    const bool paint = !th::no_color();
+    Elements hy;
+    for (size_t i = 0; i < word.size(); ++i) {
+        anim::Rgb c = anim::mix(th::depth_rgb(int(i), int(word.size()) + 2), th::rgb::kText, 0.4 * glow);
+        Element ch = text(std::string(1, word[i])) | bold;
+        hy.push_back(paint ? std::move(ch) | color(th::to_color(c)) : std::move(ch));
+    }
+    Element tag = text(" ★ recommended");
+    auto plain = [&](const std::string& s) { return paint ? text(s) | color(th::kChrome) : text(s) | dim; };
+    return vbox({views::field("Mode?", std::move(input), 8), text(""),
+                 hbox({hbox(std::move(hy)), paint ? std::move(tag) | color(th::kAccent) : std::move(tag), text("    "),
+                       plain("[b]fs"), text("   "), plain("[d]fs")})});
 }
 
 Element summary_screen(const CrawlGraph& g) {
@@ -319,7 +340,9 @@ int tui_main(int argc, char** argv) {
         crawl_done = stop_crawl = false;
         resumed = resume;
         worker = std::thread([&, resume, base = resume ? g : CrawlGraph{}]() mutable {
-            CrawlGraph r = resume ? resume_crawl(std::move(base), cfg, tap) : crawl(start, cfg, tap, pause);
+            CrawlGraph r = resume                      ? resume_crawl(std::move(base), cfg, tap)
+                           : cfg.mode == Mode::Hybrid ? crawl_hybrid(start, cfg, tap, pause)
+                                                      : crawl(start, cfg, tap, pause);
             screen.Post([&, r = std::move(r)]() mutable {
                 g = std::move(r);
                 crawl_done = true;
@@ -510,7 +533,9 @@ int tui_main(int argc, char** argv) {
                 return prompt_screen(first_run ? "Visualize? [Y/n]" : "Visualize? [y/N]", prompt_in->Render(),
                                      "y yes · n no · Enter default · Esc quit");
             case Step::Mode:
-                return prompt_screen("Mode? [b]fs or [d]fs", prompt_in->Render(), "b BFS · d DFS · Enter BFS · Esc quit");
+                if (!no_anim) animation::RequestAnimationFrame();  // the hybrid glow
+                return step_screen(mode_screen(prompt_in->Render(), !no_anim),
+                                   "h Hybrid (recommended) · b BFS · d DFS · Enter Hybrid · Esc quit");
             case Step::Depth: return prompt_screen("Max depth [" + std::to_string(kDefaultDepth) + "]", prompt_in->Render());
             case Step::Links: return prompt_screen("Max links [" + std::to_string(kDefaultLinks) + "]", prompt_in->Render());
             case Step::Crawling: return crawling_screen(ts);
@@ -530,7 +555,7 @@ int tui_main(int argc, char** argv) {
         if (q.verb == "resume") {
             set_omni("");
             refresh_hits();
-            if (g.mode == Mode::DFS) return toast("/resume: BFS only");  // resume_crawl is BFS order
+            if (g.mode != Mode::BFS) return toast("/resume: BFS only");  // resume_crawl is BFS order
             if (pending(g, cfg.maxDepth) == 0) return toast("nothing to resume");
             close_preview();
             return start_crawl(true);
@@ -605,8 +630,9 @@ int tui_main(int argc, char** argv) {
                     begin_prompt(Step::Mode, "");
                 }
                 return true;  // other keys are not typed into the box
-            case Step::Mode:  // b/d answer at once, Enter = BFS
-                if (e == Event::Return || e == Event::Character('b') || e == Event::Character('B')) cfg.mode = Mode::BFS;
+            case Step::Mode:  // h/b/d answer at once, Enter = Hybrid
+                if (e == Event::Return || e == Event::Character('h') || e == Event::Character('H')) cfg.mode = Mode::Hybrid;
+                else if (e == Event::Character('b') || e == Event::Character('B')) cfg.mode = Mode::BFS;
                 else if (e == Event::Character('d') || e == Event::Character('D')) cfg.mode = Mode::DFS;
                 else return true;  // ignored, like Visualize
                 begin_prompt(Step::Depth, "");
