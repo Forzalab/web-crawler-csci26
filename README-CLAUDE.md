@@ -137,6 +137,8 @@ build/test_bridges_json tests/bridges/golden --update   # rewrite them after a f
 
 Josh's `josh_get_links()`: `make josh` builds `build/josh_test` and runs 12 cases against his `src/team/josh.cc` and, side by side, our `HttpsFetcher` (same expectations). Cases 1-9 use a local fake web (`tests/team/josh_fixture.py`, needs python3); case 10 is LIVE (Wikipedia + `http://wowcubedocs.com/`), skipped offline or with `JOSH_TEST_OFFLINE=1`; cases 11 (a server that connects but never answers, 15 s deadline) and 12 (16 threads at once, like the TUI) run in a child process, so a hang or crash prints FAIL instead of freezing the test.
 Each row says PASS/FAIL per side, with a one-line reason under a FAIL. Exit 0 = all of Josh's cases pass. Not part of `make test` or CI (on main josh.cc is still the stub).
+`make spec1`: static check (sed/grep, no compiler) that `src/team/josh.cc` does spec #1 the professor's way: boost header + `tcp::iostream`/`beast::tcp_stream`, readlib `read.h` + `readline(stream)`, its own `GET` request, none of our fetch code (`net/http.h`, `HttpClient`, ...; our `url.h` / `html_links.h` parsers are fine). Comments and strings are stripped first. A missing timeout (`expires_after`) is only a WARN. Any file: `tests/team/spec1_check.sh FILE [--func NAME]`.
+`make josh-full` = `make spec1` then `make josh`. The checker's own self-test (`tests/team/spec1_selftest.sh`, samples in `tests/team/spec1_samples/`) is part of `make test`.
 
 Same rules as Kerney's `input_tester`: `wc < inputfileN`, `diff -w` against `outputfileN`
 (the diff is shown with `icdiff` if it is installed), 2 s timeout, and each test runs twice to check the output is deterministic.
