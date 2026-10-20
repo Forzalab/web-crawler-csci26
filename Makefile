@@ -42,7 +42,7 @@ smoke-offline: all
 smoke-live: all
 	BIN=$(BUILD)/wc tests/smoke/run.sh --live $(FILTER)
 
-# Josh's josh_get_links() vs our fetcher, 10 cases (tests/team/). Not part of `make test`.
+# Josh's josh_get_links() vs our fetcher, 12 cases (tests/team/). Not part of `make test`.
 josh: all
 	cmake --build $(BUILD) --target josh_test
 	$(BUILD)/josh_test

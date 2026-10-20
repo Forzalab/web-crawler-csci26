@@ -135,7 +135,7 @@ build/test_bridges_json tests/bridges/golden            # BRIDGES JSON golden fi
 build/test_bridges_json tests/bridges/golden --update   # rewrite them after a format change
 ```
 
-Josh's `josh_get_links()`: `make josh` builds `build/josh_test` and runs 10 cases against his `src/team/josh.cc` and, side by side, our `HttpsFetcher` (same expectations). Cases 1-9 use a local fake web (`tests/team/josh_fixture.py`, needs python3); case 10 is LIVE (Wikipedia + `http://wowcubedocs.com/`), skipped offline or with `JOSH_TEST_OFFLINE=1`.
+Josh's `josh_get_links()`: `make josh` builds `build/josh_test` and runs 12 cases against his `src/team/josh.cc` and, side by side, our `HttpsFetcher` (same expectations). Cases 1-9 use a local fake web (`tests/team/josh_fixture.py`, needs python3); case 10 is LIVE (Wikipedia + `http://wowcubedocs.com/`), skipped offline or with `JOSH_TEST_OFFLINE=1`; cases 11 (a server that connects but never answers, 15 s deadline) and 12 (16 threads at once, like the TUI) run in a child process, so a hang or crash prints FAIL instead of freezing the test.
 Each row says PASS/FAIL per side, with a one-line reason under a FAIL. Exit 0 = all of Josh's cases pass. Not part of `make test` or CI (on main josh.cc is still the stub).
 
 Same rules as Kerney's `input_tester`: `wc < inputfileN`, `diff -w` against `outputfileN`

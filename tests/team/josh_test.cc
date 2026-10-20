@@ -1,15 +1,18 @@
-// josh_test.cc - 10 checks for josh_get_links() (src/team/josh.h).
+// josh_test.cc - 12 checks for josh_get_links() (src/team/josh.h).
 // Run: make josh   (or build/josh_test [path/to/josh_fixture.py])
 //
 // Every check runs twice: once on Josh's josh_get_links(), once on our own fetcher
 // (wc::HttpsFetcher, what `wc --links` uses; robots off, no cache) with the same
 // expectations. Cases 1-9 use a local fake web (tests/team/josh_fixture.py, python3,
 // 127.0.0.1). Case 10 is LIVE (real sites); it is skipped when offline or when
-// JOSH_TEST_OFFLINE=1. Exit code 0 = every non-skipped josh check passed.
+// JOSH_TEST_OFFLINE=1. Cases 11-12 run in a child process with a deadline, so a hang
+// or a crash shows up as FAIL instead of freezing or killing this program.
+// Exit code 0 = every non-skipped josh check passed.
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -20,6 +23,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "net/https_fetcher.h"
@@ -99,7 +103,7 @@ std::string want_fail(const Subject& s, const std::string& url, const std::strin
     return "";
 }
 
-// ---- the 10 cases. "" = PASS, "SKIP ..." = skipped, anything else = FAIL reason ----
+// ---- the 12 cases. "" = PASS, "SKIP ..." = skipped, anything else = FAIL reason ----
 
 std::string c1_basic(const Subject& s) {
     return want_links(s, base + "/basic", {"http://a.example/one", "https://b.example/two", "http://a.example/one"},
@@ -213,6 +217,90 @@ std::string c10_live(const Subject& s) {
     return "";
 }
 
+// Runs fn in a child process. Child crashed or not back within `secs` -> FAIL text.
+std::string isolated(const std::function<std::string()>& fn, int secs_limit, const std::string& what) {
+    int p[2];
+    if (pipe(p) != 0) return "could not create a pipe";
+    std::fflush(nullptr);
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(p[0]);
+        std::string r = fn();
+        (void)!write(p[1], r.data(), r.size());
+        _exit(0);
+    }
+    close(p[1]);
+    std::string out;
+    auto end = std::chrono::steady_clock::now() + std::chrono::seconds(secs_limit);
+    bool hung = false;
+    for (;;) {
+        int left = int(std::chrono::duration_cast<std::chrono::milliseconds>(end - std::chrono::steady_clock::now()).count());
+        if (left <= 0) { hung = true; break; }
+        pollfd pf{p[0], POLLIN, 0};
+        if (poll(&pf, 1, left) <= 0) continue;
+        char buf[512];
+        ssize_t n = read(p[0], buf, sizeof buf);
+        if (n <= 0) break;  // child closed the pipe: done (or died)
+        out.append(buf, size_t(n));
+    }
+    close(p[0]);
+    if (hung) kill(pid, SIGKILL);
+    int st = 0;
+    waitpid(pid, &st, 0);
+    if (hung) return what + ": not back after " + std::to_string(secs_limit) + " s, the crawl would hang here";
+    if (WIFSIGNALED(st)) return what + ": crashed (signal " + std::to_string(WTERMSIG(st)) + "), the whole crawler would die";
+    return out;
+}
+
+std::string c11_silent_server(const Subject& s) {
+    // Accepts the connection (kernel backlog) but never answers a single byte.
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t len = sizeof a;
+    ::bind(fd, (sockaddr*)&a, sizeof a);
+    ::listen(fd, 16);
+    ::getsockname(fd, (sockaddr*)&a, &len);
+    std::string url = "http://127.0.0.1:" + std::to_string(ntohs(a.sin_port)) + "/";
+    std::string r = isolated([&] {
+        Got g = call(s, url);
+        if (!g.threw.empty()) return url + " threw (" + g.threw + "), the crawler expects ok=false, not an exception";
+        if (g.ok) return url + " never answered, got ok=true, crawler expected ok=false";
+        return std::string();
+    }, 15, url + " connects but never answers");
+    ::close(fd);
+    return r;
+}
+
+std::string c12_parallel(const Subject& s) {
+    // The TUI crawls with 16 threads at once, all calling the same function.
+    const std::vector<std::string> urls = {base + "/basic", base + "/dir/sub/rel", base + "/charset-chunked",
+                                           base + "/chain/end"};
+    std::vector<Got> ref;
+    for (const auto& u : urls) ref.push_back(call(s, u));
+    return isolated([&] {
+        constexpr int kThreads = 16, kRounds = 4;
+        std::vector<std::string> bad(kThreads);
+        std::vector<std::thread> ts;
+        for (int t = 0; t < kThreads; ++t)
+            ts.emplace_back([&, t] {
+                for (int k = 0; k < kRounds && bad[size_t(t)].empty(); ++k) {
+                    size_t i = size_t(t + k) % urls.size();
+                    Got g = call(s, urls[i]);
+                    if (!g.threw.empty()) bad[size_t(t)] = urls[i] + " threw (" + g.threw + ") with 16 threads at once";
+                    else if (g.ok != ref[i].ok || g.links != ref[i].links)
+                        bad[size_t(t)] = urls[i] + " with 16 threads at once gave " + (g.ok ? show(g.links) : "ok=false") +
+                                         ", alone it gave " + (ref[i].ok ? show(ref[i].links) : "ok=false");
+                }
+            });
+        for (auto& t : ts) t.join();
+        for (const auto& b : bad)
+            if (!b.empty()) return b;
+        return std::string();
+    }, 30, "16 threads calling it at once");
+}
+
 // ---- fixture server ----
 
 pid_t start_fixture(const std::string& script) {
@@ -283,6 +371,8 @@ int main(int argc, char** argv) {
         {"301->302 chain, loop", c8_redirect_chain},
         {"dead or bad URLs", c9_dead_ends},
         {"LIVE wikipedia, wowcube", c10_live},
+        {"silent server (no hang)", c11_silent_server},
+        {"16 threads at once", c12_parallel},
     };
 
     std::cout << "josh_get_links() vs our fetcher, fake web at " << base << "\n\n";
