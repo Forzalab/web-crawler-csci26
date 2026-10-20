@@ -3,13 +3,17 @@
 CSCI 26 group project: crawl a website, build a graph of its links (BFS and DFS,
 max depth 3, max size 1000, 0.1 s between requests) and draw it on BRIDGES.
 
+Three traversals: BFS and DFS (Tony, `src/core/crawl.cc`) and **Hybrid** (`src/core/crawl_hybrid.cc`), after Zhou & Hansen, "Combining Breadth-First and Depth-First Strategies in Searching for Treewidth", IJCAI-09, pp. 640–645 (https://www.ijcai.org/Proceedings/09/Papers/112.pdf): breadth-first layer by layer (layer d is fetched completely before layer d+1), and inside a layer the pages go in depth-first order of a prefix trie (key = host labels reversed, then path segments: `com → wowcube → www → docs → ...`). Same site, same path = fetched back to back. With a size cap, that order decides which last-layer pages make it in, so the graph can differ from BFS.
+
 One binary, `wc`, two front ends:
 - **pipe mode** (stdin redirected): reads a fake web from stdin and prints a deterministic report. This is what the tests use. It never touches the network and never really sleeps.
-- **TUI** (stdin is a terminal): FTXUI screen. Prompts: URL (an invalid one shows a red `not a URL: ...` line and Enter / Tab do nothing), Visualize?, `Mode? [b]fs or [d]fs` (Enter = BFS), Max depth, Max links. BFS crawls with 16 parallel fetches (still polite per host: robots.txt, Crawl-delay, 429 pacing; pipe mode stays sequential with the 0.1 s delay); DFS is the spec path, sequential with the 0.1 s delay. The loading and summary screens show the mode. Esc on the loading screen stops and shows the graph so far; `/resume` crawls on into the same graph (BFS only: on a DFS graph it says `/resume: BFS only`). `/bridges` uploads the graph through `gateway/` when `WC_GATEWAY_URL` is set (assignment: a random 7-digit id per session, `BRIDGES_ASSIGNMENT` overrides; `WC_BRIDGES_SUB` default 0, `WC_GATEWAY_TOKEN` if the gateway has `GATEWAY_TOKEN`); after that, a finished `/resume` re-uploads to the same assignment, so the same link shows the bigger graph.
+- **TUI** (stdin is a terminal): FTXUI screen. Prompts: URL (an invalid one shows a red `not a URL: ...` line and Enter / Tab do nothing), Visualize?, `Mode?` (`h` Hybrid ★ recommended, `b` BFS, `d` DFS; Enter = Hybrid), Max depth, Max links. BFS crawls with 16 parallel fetches (still polite per host: robots.txt, Crawl-delay, 429 pacing; pipe mode stays sequential with the 0.1 s delay); DFS and Hybrid are sequential with the 0.1 s delay (Esc stops them too). The loading and summary screens show the mode. Esc on the loading screen stops and shows the graph so far; `/resume` crawls on into the same graph (BFS only: on a DFS graph it says `/resume: BFS only`). `/bridges` uploads the graph through `gateway/` when `WC_GATEWAY_URL` is set (assignment: a random 7-digit id per session, `BRIDGES_ASSIGNMENT` overrides; `WC_BRIDGES_SUB` default 0, `WC_GATEWAY_TOKEN` if the gateway has `GATEWAY_TOKEN`); after that, a finished `/resume` re-uploads to the same assignment, so the same link shows the bigger graph.
 
 TUI graph screen:
 - **LINKS** meter = discovered URLs (the graph's nodes), capped by the "Max links" prompt. The loading screen counts `fetched` (attempts), `links`, `fail`, `depth`.
-- **Replay**: a finished crawl replays as if live, never longer than 8 s. Small crawls keep one fetch every 120 ms; bigger ones become a wave, one BFS level at a time, siblings landing 3 at a time.
+- **Replay**: a finished crawl replays as if live, never longer than 8 s. Small crawls keep one fetch every 120 ms; bigger ones become a wave, one BFS level at a time, siblings landing 3 at a time. A Hybrid crawl keeps its fetch order inside a level, so its trie streams sweep through each wedge.
+- **Depth colours**: one lava ramp over the crawl's depths: white-hot root → yellow → orange → hot red → hot magenta → ice blue at the deepest ring (`theme::depth_rgb`). Every ring is ≥ 5:1 on pure black (projector); grey UI text too. The legend is a box in the bottom-left corner: the ramp with its depths, then shape → site. `NO_COLOR`: the old grey look and one-row legend.
+- **Eruption** (every mode): when a ring starts, a shockwave rolls out to its radius; each new page flies out from its parent as a white-hot dot, lands white-hot and cools to its ring's colour in ~400 ms. `--no-anim` / `NO_COLOR`: static, no effects.
 - **Level of detail**, highways first like a map: tree edges into big subtrees first, edges to depth 1 always, SEEN back-links (grey) only once every visible tree edge fits the budget, and then only half of what is left (`kSeenShare`). The budget grows with screen size and zoom in; zooming out never shrinks it (shorter edges, so more of them show). Labels go one ring deeper at zoom 2.5 and everywhere at 5. Labels never touch edge dots (padded, one free row above and below).
 - **Traffic**: once the replay is done, a few drawn SEEN edges sometimes carry a short grey-white pulse a -> b (at most 3 at once, ~800 ms each). Off with `--no-anim` / `NO_COLOR`.
 - **Sites** (node shape, legend, clusters) = last two host labels (`icann.org`), but a crawl of fewer than 3 such sites keys by host instead (`en.wikipedia.org`, `de.wikipedia.org`: one shape each).
@@ -77,7 +81,7 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 (our fetcher + `.wc-cache/` + robots.txt + honest UA), but the spec path: sequential `crawl()`, 0.1 s sleep between requests.
 
 ```sh
-./a.out --report URL [--bfs|--dfs] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]
+./a.out --report URL [--bfs|--dfs|--hybrid] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]
 ```
 
 - A bare domain works (`--report espn.com`, also `--links` and the TUI): `https://` is tried first, and only if that start fetch gets no HTTP answer (TLS, CONNECT, DNS, TIMEOUT, IO) it switches to `http://` (`pick_start()`). A 404 or 403 is an answer and stays https; a typed `http://` or `https://` is never changed. Fixture and `--offline` runs skip the probe.
@@ -89,7 +93,9 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 - stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
 - `WC_FIXTURE=file` crawls a fake web instead (`tests/report/run.sh`, offline, in `make test` and CI).
 
-Writes `DIR` (default `runs/<host>-<bfs|dfs>/`, gitignored):
+`--hybrid` = `crawl_hybrid()`, same fetch stack and 0.1 s sleep. The default stays BFS.
+
+Writes `DIR` (default `runs/<host>-<bfs|dfs|hybrid>/`, gitignored):
 
 | File | What |
 |---|---|
@@ -159,6 +165,7 @@ third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 |---|---|---|
 | #1 fetch a page, return its URLs | Josh | `src/team/josh.cc`: `josh_get_links(url)` |
 | #2 graph traversal, BFS + DFS | Tony | `src/core/crawl.cc` |
+| Hybrid traversal (BFS layers + trie order) | Claude | `src/core/crawl_hybrid.cc` |
 | #3 BRIDGES rendering | Logan | `src/team/logan.cc`: `logan_draw(nodes, edges)` |
 
 Josh and Logan each fill in one function in `src/team/`, using plain `vector`, `string` and small structs. The `.h` files there say exactly what goes in and what comes out. The glue in `src/adapters/` turns those into the crawler's types, so nobody else's code needs to change.

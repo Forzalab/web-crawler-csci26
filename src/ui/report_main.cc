@@ -1,7 +1,7 @@
 // report_main.cc - `wc --report URL`: one headless crawl -> a run dir for the report (D2/D3).
 // Same fetch stack as the TUI (RoutedFetcher + PageCache + robots), but the spec path:
 // sequential crawl() with a real 0.1 s sleep between requests. Cache on, so a rerun replays.
-//   --bfs | --dfs   --depth N (3)   --size N (1000)   --out DIR (runs/<host>-<bfs|dfs>/)
+//   --bfs | --dfs | --hybrid   --depth N (3)   --size N (1000)   --out DIR (runs/<host>-<bfs|dfs|hybrid>/)
 //   --cache DIR (.wc-cache)   --offline (cache only)   --upload (needs WC_GATEWAY_URL)
 //   --pdf-link: share summary.pdf for 24 h via the gateway (WC_PDF_URL, else WC_GATEWAY_URL)
 // WC_FIXTURE=file: fake web instead of the network (tests/report/), no sleeps.
@@ -22,6 +22,7 @@
 #include "adapters/josh_fetcher.h"
 #include "bridges/bridges_json.h"
 #include "core/crawl.h"
+#include "core/crawl_hybrid.h"
 #include "net/cache.h"
 #include "net/gateway.h"
 #include "net/https_fetcher.h"
@@ -152,6 +153,7 @@ int report_main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--report") && has_arg) url = argv[++i];
         else if (!std::strcmp(argv[i], "--bfs")) cfg.mode = Mode::BFS;
         else if (!std::strcmp(argv[i], "--dfs")) cfg.mode = Mode::DFS;
+        else if (!std::strcmp(argv[i], "--hybrid")) cfg.mode = Mode::Hybrid;
         else if (!std::strcmp(argv[i], "--depth") && has_arg) cfg.maxDepth = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--size") && has_arg) cfg.maxSize = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--out") && has_arg) out = argv[++i];
@@ -161,10 +163,10 @@ int report_main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--pdf-link")) pdf_link = true;
     }
     if (url.empty() || cfg.maxDepth < 0 || cfg.maxSize < 1) {
-        std::cerr << "usage: wc --report URL [--bfs|--dfs] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]\n";
+        std::cerr << "usage: wc --report URL [--bfs|--dfs|--hybrid] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]\n";
         return 2;
     }
-    const std::string mode = cfg.mode == Mode::BFS ? "bfs" : "dfs";
+    const std::string mode = cfg.mode == Mode::BFS ? "bfs" : cfg.mode == Mode::DFS ? "dfs" : "hybrid";
     const char* gateway = std::getenv("WC_GATEWAY_URL");
     if (upload && !(gateway && *gateway)) {
         std::cerr << "--upload needs WC_GATEWAY_URL\n";
@@ -198,7 +200,7 @@ int report_main(int argc, char** argv) {
     const LiveTimes live = offline ? live_times(out + "/stats.json") : LiveTimes{};  // before this run rewrites it
     std::time_t started = std::time(nullptr);
     const auto t0 = std::chrono::steady_clock::now();
-    CrawlGraph g = crawl(url, cfg, tap, sleeper);
+    CrawlGraph g = cfg.mode == Mode::Hybrid ? crawl_hybrid(url, cfg, tap, sleeper) : crawl(url, cfg, tap, sleeper);
     long wall_ms = long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
     const bool carried = live.wall_ms >= 0;  // replay over a live run: report the live time + start
     if (carried) wall_ms = live.wall_ms, started = live.started;

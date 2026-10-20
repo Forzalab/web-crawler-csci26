@@ -1,8 +1,8 @@
 # TUI smoke suite
 
 Drives the real TUI (`build/wc`) inside detached tmux panes of fixed sizes, types
-the URL / Visualize / Mode / depth / links prompts (Mode: Enter = BFS, `d` when the
-case's optional last `crawl` column in `cases.tsv` is `dfs`), waits for the crawl and the replay, then
+the URL / Visualize / Mode / depth / links prompts (Mode: the first letter of the
+case's optional last `crawl` column in `cases.tsv`: `b` (default `bfs`), `d` for `dfs`, `h` for `hybrid`; Enter alone = Hybrid), waits for the crawl and the replay, then
 quits with Esc. Catches crashes, hangs and broken layouts. Needs `tmux` and `python3`.
 
 ## Run

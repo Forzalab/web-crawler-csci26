@@ -61,7 +61,7 @@ void CrawlGraph::record_fetch(const std::string& url, bool ok) {
     if (id >= 0) nodes[id].status = ok ? Status::Fetched : Status::Failed;
 }
 
-const char* to_string(Mode m) { return m == Mode::BFS ? "BFS" : "DFS"; }
+const char* to_string(Mode m) { return m == Mode::BFS ? "BFS" : m == Mode::DFS ? "DFS" : "HYBRID"; }
 
 const char* to_string(Status s) {
     switch (s) {

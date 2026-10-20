@@ -26,6 +26,7 @@ add_library(wc_core STATIC
   src/core/graph.cc
   src/core/sleeper.cc
   src/core/crawl.cc          # Tony's #2
+  src/core/crawl_hybrid.cc   # Claude: BFS layers, trie order inside a layer
   src/core/crawl_parallel.cc # TUI: parallel BFS + resume (same graph as crawl_bfs)
   src/core/tree.cc           # spanning tree: layout, LOD, BRIDGES subset
   src/mocks/mock_fetcher.cc
@@ -117,6 +118,9 @@ target_compile_options(wc_graph_test PRIVATE -Wall -Wextra)
 add_executable(wc_crawl_test tests/unit/crawl_test.cc)
 target_link_libraries(wc_crawl_test PRIVATE wc_core)
 target_compile_options(wc_crawl_test PRIVATE -Wall -Wextra)
+add_executable(wc_hybrid_test tests/unit/hybrid_test.cc)  # crawl_hybrid + depth_rgb
+target_link_libraries(wc_hybrid_test PRIVATE wc_ui_views)
+target_compile_options(wc_hybrid_test PRIVATE -Wall -Wextra)
 add_executable(wc_parallel_test tests/unit/parallel_test.cc)  # parallel BFS == sequential, cancel, resume
 target_link_libraries(wc_parallel_test PRIVATE wc_core)
 target_compile_options(wc_parallel_test PRIVATE -Wall -Wextra)

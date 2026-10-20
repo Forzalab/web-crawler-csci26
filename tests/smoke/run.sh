@@ -122,7 +122,7 @@ while IFS=$'\t' read -r name url depth size cols rows mode fixture timeout_s cra
         T send-keys -t "$sess" -l -- "$url"
         step "" 'Visualize'
         answer "y" 'Mode'
-        if [ "${crawl:-bfs}" = dfs ]; then answer "d" 'Max depth'; else step "" 'Max depth'; fi
+        c=${crawl:-bfs}; answer "${c:0:1}" 'Max depth'  # h / b / d answer at once; Enter alone = Hybrid
         step "$depth" 'Max links'
         step "$size" 'crawling|DEPTH'
         t_crawl=$(now)

@@ -4,6 +4,7 @@
 // Big crawls would take minutes that way, so a schedule that ends after
 // budget_ms becomes a wave instead: one BFS level at a time, every fetch of
 // the level at once, siblings landing `batch` at a time. Never over budget_ms.
+// A Mode::Hybrid crawl keeps its fetch order inside a level (the trie sweep).
 #pragma once
 
 #include <cstdint>
@@ -19,6 +20,7 @@ struct ReplayFrame {
     int depth = 0;              // max depth among shown nodes
     int size = 0;               // shown node count
     bool done = false;          // everything landed
+    double ms = 0;              // content time of this frame (volcano effects in views::graph)
 };
 
 struct ReplayTiming { int step_ms = 120; int edge_ms = 250; int budget_ms = 8000; int batch = 3; };

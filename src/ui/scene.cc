@@ -96,6 +96,18 @@ Scene make_scene(const CrawlGraph& g, Layout lay) {
     s.order = std::move(tree);
     s.order.insert(s.order.end(), rest.begin(), rest.end());
     find_clusters(s, kids);
+    s.land.assign(n, -1.0);
+    for (const Node& nd : g.nodes) s.max_depth = std::max(s.max_depth, nd.depth);
+    s.ring_start.assign(size_t(s.max_depth) + 1, -1.0);
+    for (size_t e = 0; e < g.edges.size(); ++e) {
+        int b = s.plan.to[e];
+        double st = s.plan.start[e];
+        if (b <= 0 || st < 0 || g.edges[e].seen) continue;
+        double& l = s.land[size_t(b)];
+        if (l < 0 || st + s.plan.edge_ms < l) l = st + s.plan.edge_ms;
+        double& r = s.ring_start[size_t(g.nodes[size_t(b)].depth)];
+        if (r < 0 || st < r) r = st;
+    }
     return s;
 }
 

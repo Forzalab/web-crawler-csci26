@@ -42,6 +42,11 @@ struct Scene {
     int n_tree = 0;               // order[0, n_tree): tree edges; the rest are SEEN (and odd NEW)
     std::vector<Cluster> clusters;
     std::vector<int> cluster_of;  // per node: cluster index it folds into, -1 = none
+    // Volcano replay (views::graph): when each node lands (content ms, -1 never / root),
+    // when each depth ring starts erupting (first edge into it, -1 none), deepest node.
+    std::vector<double> land;
+    std::vector<double> ring_start;
+    int max_depth = 0;
 };
 
 // order = tree edges by (child depth > 1, child leaves desc, id), then the
