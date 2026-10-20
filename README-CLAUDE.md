@@ -135,6 +135,9 @@ build/test_bridges_json tests/bridges/golden            # BRIDGES JSON golden fi
 build/test_bridges_json tests/bridges/golden --update   # rewrite them after a format change
 ```
 
+Josh's `josh_get_links()`: `make josh` builds `build/josh_test` and runs 10 cases against his `src/team/josh.cc` and, side by side, our `HttpsFetcher` (same expectations). Cases 1-9 use a local fake web (`tests/team/josh_fixture.py`, needs python3); case 10 is LIVE (Wikipedia + `http://wowcubedocs.com/`), skipped offline or with `JOSH_TEST_OFFLINE=1`.
+Each row says PASS/FAIL per side, with a one-line reason under a FAIL. Exit 0 = all of Josh's cases pass. Not part of `make test` or CI (on main josh.cc is still the stub).
+
 Same rules as Kerney's `input_tester`: `wc < inputfileN`, `diff -w` against `outputfileN`
 (the diff is shown with `icdiff` if it is installed), 2 s timeout, and each test runs twice to check the output is deterministic.
 Prints PASS or FAIL per rung and a summary. CI runs the same script on every push and PR; it only reports and never blocks a merge.

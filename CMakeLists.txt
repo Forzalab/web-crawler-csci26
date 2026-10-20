@@ -143,3 +143,10 @@ endforeach()
 add_executable(test_bridges_json tests/bridges/test_bridges_json.cc)
 target_link_libraries(test_bridges_json PRIVATE wc_core)
 target_compile_options(test_bridges_json PRIVATE -Wall -Wextra)
+
+# --- josh_test: 10 checks for josh_get_links() vs our fetcher (make josh) ---
+# Not in `make`, `make test` or CI: on main josh.cc is still the stub.
+add_executable(josh_test EXCLUDE_FROM_ALL tests/team/josh_test.cc src/team/josh.cc)
+target_link_libraries(josh_test PRIVATE wc_net wc_core)
+target_compile_definitions(josh_test PRIVATE JOSH_FIXTURE="${CMAKE_SOURCE_DIR}/tests/team/josh_fixture.py")
+target_compile_options(josh_test PRIVATE -Wall -Wextra)
