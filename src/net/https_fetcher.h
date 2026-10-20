@@ -98,14 +98,17 @@ private:
 };
 
 // https:// -> tls. http:// -> josh first; if Josh fails (or is not wired yet,
-// or the site 308s to https) -> tls. Josh's plug-in takes over http:// once it works.
+// or the site 308s to https) -> stream (spec #1 fallback, if given) -> tls.
+// Josh's plug-in takes over http:// once it works.
 class RoutedFetcher : public LinkSource {
 public:
     RoutedFetcher(LinkSource& josh, LinkSource& tls) : josh_(josh), tls_(tls) {}
+    RoutedFetcher(LinkSource& josh, LinkSource& stream, LinkSource& tls) : josh_(josh), stream_(&stream), tls_(tls) {}
     std::optional<std::vector<std::string>> links(const std::string& url) override;
 
 private:
     LinkSource& josh_;
+    LinkSource* stream_ = nullptr;
     LinkSource& tls_;
 };
 

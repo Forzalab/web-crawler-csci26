@@ -26,6 +26,7 @@
 #include "net/cache.h"
 #include "net/gateway.h"
 #include "net/https_fetcher.h"
+#include "net/stream_fetch.h"
 #include "net/url.h"
 #include "ui/fixture_source.h"
 #include "ui/front_ends.h"
@@ -68,7 +69,7 @@ public:
         o.ok = r.has_value();
         if (tls_) {
             FetchResult last = tls_->last();
-            o.tls = last.url == url;  // else Josh answered (http://)
+            o.tls = last.url == url;  // else Josh or the stream fetcher answered (http://)
             if (o.tls) {
                 o.status = last.status;
                 o.error = last.error;
@@ -180,11 +181,13 @@ int report_main(int argc, char** argv) {
     const char* token = std::getenv("WC_GATEWAY_TOKEN");
 
     JoshFetcher josh;
+
+    StreamFetcher stream;  // spec #1 fallback for http://
     HttpsFetcher tls;
     PageCache cache(cache_dir);
     tls.use_cache(&cache, offline, false);
     tls.use_robots(true);
-    RoutedFetcher routed(josh, tls);
+    RoutedFetcher routed(josh, stream, tls);
     auto fixture = fixture_source_from_env();
     if (!fixture) url = offline ? with_scheme(url) : pick_start(url, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
     if (out.empty()) {

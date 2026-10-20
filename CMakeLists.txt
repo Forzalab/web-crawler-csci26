@@ -49,6 +49,7 @@ add_library(wc_net STATIC
   src/net/cache.cc
   src/net/robots.cc
   src/net/gateway.cc  # TUI /bridges: POST the graph to gateway/
+  src/net/stream_fetch.cc  # spec #1 fallback: Boost tcp::iostream + readlib (http only)
 )
 target_include_directories(wc_net PUBLIC src)
 target_link_libraries(wc_net PUBLIC wc_core)  # Sleeper
@@ -59,6 +60,16 @@ if(OPENSSL_FOUND)
   target_link_libraries(wc_net PUBLIC OpenSSL::SSL OpenSSL::Crypto)
 else()
   message(WARNING "OpenSSL not found: https:// fetches will fail (install libssl-dev)")
+endif()
+# Boost (header-only: asio + beast) for src/net/stream_fetch.cc, the spec #1 fetcher.
+# Optional: without it stream_fetch is a stub (always fails) and the build still works.
+# Debian/Ubuntu: apt install libboost-dev.
+find_package(Boost 1.70 QUIET)
+if(Boost_FOUND)
+  target_compile_definitions(wc_net PRIVATE WC_HAVE_BOOST)
+  target_include_directories(wc_net PRIVATE ${Boost_INCLUDE_DIRS})
+else()
+  message(STATUS "Boost not found: spec #1 stream fetcher is a stub (install libboost-dev)")
 endif()
 
 # --- wc_ui_logic: pure TUI logic (no FTXUI): layout, replay, omnibar, osc52 -
