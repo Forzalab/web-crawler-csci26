@@ -231,6 +231,21 @@ static void test_router() {
     CHECK_EQ(r.links("http://none/").has_value(), false);
 }
 
+// http:// that robots.txt blocks never goes to Josh / stream (they skip robots).
+static void test_router_robots() {
+    MockFetcher josh(FakeWeb{{"http://r.com/no", std::vector<std::string>{"http://r.com/x"}},
+                             {"http://r.com/yes", std::vector<std::string>{"http://r.com/y"}}});
+    HttpsFetcher tls([](const Url& u) {
+        if (u.str() == "http://r.com/robots.txt") return resp(200, {{"content-type", "text/plain"}}, "User-agent: *\nDisallow: /no\n");
+        return resp(404, {});
+    });
+    RoutedFetcher r(josh, tls);
+    CHECK_EQ(r.links("http://r.com/no").has_value(), false);
+    CHECK_EQ(tls.label_of("http://r.com/no"), std::string("ROBOTS"));
+    CHECK_EQ(join(*r.links("http://r.com/yes")), std::string("http://r.com/y\n"));
+    CHECK_EQ(josh.call_log.size(), size_t(1));  // only /yes reached Josh
+}
+
 static void test_cache() {
     namespace fs = std::filesystem;
     fs::path dir = fs::temp_directory_path() / ("wc_net_test_" + std::to_string(getpid()));
@@ -673,6 +688,7 @@ int main() {
     test_http_parse();
     test_fetcher();
     test_router();
+    test_router_robots();
     test_cache();
     test_robots_parse();
     test_polite_fetch();

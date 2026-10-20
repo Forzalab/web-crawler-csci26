@@ -103,6 +103,14 @@ FetchResult HttpsFetcher::fetch_raw(const std::string& url) {
     return r;
 }
 
+bool HttpsFetcher::handles_itself(const std::string& url) {
+    if (offline_) return true;
+    auto u = parse_url(url);
+    if (!u) return false;
+    if (robots_on_ && robots_block(url, *u)) return true;
+    return cache_ && !refresh_ && cache_->load(url).has_value();
+}
+
 // nullopt = go ahead. Else the result to return instead of fetching.
 std::optional<FetchResult> HttpsFetcher::robots_block(const std::string& url, const Url& u) {
     if (u.path == "/robots.txt") return std::nullopt;
@@ -221,6 +229,7 @@ std::optional<std::vector<std::string>> RoutedFetcher::links(const std::string& 
     if (url.size() >= 8 && std::equal(url.begin(), url.begin() + 8, "https://",
                                       [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; }))
         return tls_.links(url);
+    if (auto* t = dynamic_cast<HttpsFetcher*>(&tls_); t && t->handles_itself(url)) return tls_.links(url);
     if (auto r = josh_.links(url)) return r;
     if (stream_)
         if (auto r = stream_->links(url)) return r;

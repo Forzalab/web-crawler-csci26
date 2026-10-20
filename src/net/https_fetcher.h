@@ -73,6 +73,9 @@ public:
     std::optional<std::vector<std::string>> links(const std::string& url) override;
     FetchResult last() const;                            // result of the latest links()
     std::string label_of(const std::string& url) const;  // status_label of links(url); "" = never asked
+    // true = answer this url here, not via Josh / stream: robots.txt blocks it,
+    // it is cached (so replays match) or we are offline. RoutedFetcher asks first.
+    bool handles_itself(const std::string& url);
 
 private:
     FetchResult fetch_raw(const std::string& url);
@@ -100,6 +103,7 @@ private:
 // https:// -> tls. http:// -> josh first; if Josh fails (or is not wired yet,
 // or the site 308s to https) -> stream (spec #1 fallback, if given) -> tls.
 // Josh's plug-in takes over http:// once it works.
+// Robots, cache and offline still apply: an HttpsFetcher tls that handles_itself(url) answers.
 class RoutedFetcher : public LinkSource {
 public:
     RoutedFetcher(LinkSource& josh, LinkSource& tls) : josh_(josh), tls_(tls) {}
