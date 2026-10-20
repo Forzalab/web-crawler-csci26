@@ -17,10 +17,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps (tmux, strace, libssl-dev)
+      - name: Install deps (tmux, strace, libssl-dev, libboost-dev)
         run: |
-          command -v tmux > /dev/null && command -v strace > /dev/null && dpkg -s libssl-dev > /dev/null 2>&1 \
-            || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends tmux strace libssl-dev; }
+          command -v tmux > /dev/null && command -v strace > /dev/null && dpkg -s libssl-dev > /dev/null 2>&1 && dpkg -s libboost-dev > /dev/null 2>&1 \
+            || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends tmux strace libssl-dev libboost-dev; }
           tmux -V
           strace -V | head -1
 
