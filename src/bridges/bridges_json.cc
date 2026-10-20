@@ -38,10 +38,6 @@ std::string color(const Rgba& c) { return color(c, c.a / 255.0); }
 
 // Pretty mode: shape per site rank (most pages first), the rest share the last one.
 const char* const kSiteShape[] = {"diamond", "circle", "square", "triangle", "star", "cross", "wye"};
-const Rgba kGrey = {128, 128, 128, 255};
-// Pretty mode: node colour per site rank (most pages first), the rest grey. No red: red is the root.
-const Rgba kSite[] = {{31, 119, 180, 255}, {44, 160, 44, 255}, {148, 103, 189, 255}, {255, 127, 14, 255},
-                      {23, 190, 207, 255}, {227, 119, 194, 255}, {127, 127, 127, 255}};
 
 // Length of a valid UTF-8 sequence starting at s[i], 0 if invalid.
 size_t utf8_len(const std::string& s, size_t i) {
@@ -170,13 +166,13 @@ std::string bridges_json(const CrawlGraph& g, const BridgesMeta& meta) {
                    (rescued ? "diamond" : "circle") + "\",\"size\":10.0,\"name\":" + quote(name) + "}";
             continue;
         }
-        // Site constellations: colour + shape by site rank; the root is a big red star.
+        // Colour by hops (ROYGBIV, spec #3), shape by site rank; the root is a big red star.
         auto r = meta.site_rank.find(n.url);
         int rank = r == meta.site_rank.end() || r->second < 0 ? 6 : std::min(r->second, 6);
         const bool root = i == 0, hub = hubs.count(i) > 0;
         double size = std::round(60 + 40 * std::sqrt(double(in[size_t(i)]))) / 10;  // 6 + 4*sqrt, 0.1 steps
         size = root ? 60.0 : std::clamp(size, hub ? 45.0 : 6.0, 60.0);
-        std::string col = root ? color(kHop[0], 1.0) : color(kSite[rank], n.status == Status::Unfetched ? 0.35 : 1.0);
+        std::string col = root ? color(kHop[0], 1.0) : color(kHop[std::clamp(n.depth, 0, 6)], n.status == Status::Unfetched ? 0.35 : 1.0);
         std::string loc;
         if (auto p = meta.location.find(n.url); scale > 0 && p != meta.location.end())
             loc = ",\"location\":[" + num(std::round(p->second.first * scale * 10) / 10) + "," +
@@ -205,8 +201,8 @@ std::string bridges_json(const CrawlGraph& g, const BridgesMeta& meta) {
             look = color(l.seen ? kBackEdge : kTreeEdge) + ",\"thickness\":" + num(l.seen ? 4.5 : 1.0);
         else if (!l.seen && hop_on[size_t(b)] > 0 && hop_on[size_t(a)] == hop_on[size_t(b)] - 1)  // rainbow highway
             look = color(kHop[std::min(hop_on[size_t(a)], 6)], 1.0) + ",\"thickness\":" + num(6.0);
-        else if (l.seen)
-            look = color(kGrey, 0.3) + ",\"thickness\":" + num(0.5);
+        else if (l.seen)  // back-link: bold (spec #3)
+            look = color(kBackEdge, 0.45) + ",\"thickness\":" + num(3.0);
         else
             look = color(kHop[std::clamp(g.nodes[size_t(b)].depth, 0, 6)], 0.8) + ",\"thickness\":" + num(1.5);
         out += "{\"color\":" + look + ",\"source\":\"" + std::to_string(l.src) + "\",\"target\":\"" +
