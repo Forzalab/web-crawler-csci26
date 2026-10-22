@@ -1,5 +1,5 @@
 // links_main.cc - `wc --links URL`: one real fetch, links on stdout, status on
-// stderr. Smoke test for the fetch path (Josh adapter, spec #1 stream fetcher, our TLS fetcher).
+// stderr. Smoke test for the fetch path (Josh adapter = spec #1, our TLS fetcher).
 // Cache flags: --cache DIR (default .wc-cache), --no-cache, --offline, --refresh.
 // --no-robots skips robots.txt (on by default).
 #include <cstring>
@@ -8,7 +8,6 @@
 #include "adapters/josh_fetcher.h"
 #include "net/cache.h"
 #include "net/https_fetcher.h"
-#include "net/stream_fetch.h"
 #include "ui/front_ends.h"
 
 namespace wc {
@@ -31,12 +30,11 @@ int links_main(int argc, char** argv) {
         return 2;
     }
     JoshFetcher josh;
-    StreamFetcher stream;  // spec #1 fallback for http://
     HttpsFetcher tls;
     PageCache cache(cache_dir);
     if (use_cache) tls.use_cache(&cache, offline, refresh);
     tls.use_robots(robots);
-    RoutedFetcher routed(josh, stream, tls);
+    RoutedFetcher routed(josh, tls);
     LinkSource& src = offline ? static_cast<LinkSource&>(tls) : routed;  // offline: never touch Josh's network
     std::string start = pick_start(url, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
     auto links = src.links(start);
@@ -47,8 +45,6 @@ int links_main(int argc, char** argv) {
                   << " type=" << r.content_type << " bytes=" << r.body.size()
                   << " cache=" << (!use_cache ? "off" : r.from_cache ? "hit" : "miss")
                   << (r.error.empty() ? "" : " error=" + r.error) << '\n';
-    else if (stream.last_ok() == start)
-        std::cerr << "[fetch] via=stream\n";  // spec #1 fallback (Josh failed)
     else
         std::cerr << "[fetch] via=josh\n";
     if (!links) return 1;

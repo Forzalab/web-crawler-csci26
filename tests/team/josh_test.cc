@@ -1,10 +1,10 @@
 // josh_test.cc - 12 checks for josh_get_links() (src/team/josh.h).
 // Run: make josh   (or build/josh_test [path/to/josh_fixture.py])
 //
-// Every check runs three times with the same expectations: on Josh's josh_get_links(),
-// on our spec #1 fallback (wc::stream_get_links, Boost tcp::iostream + readlib; column
-// skipped when built without Boost) and on our own fetcher (wc::HttpsFetcher, what
-// `wc --links` uses; robots off, no cache). Cases 1-9 use a local fake web (tests/team/josh_fixture.py, python3,
+// Every check runs twice with the same expectations: on josh_get_links() (now the spec #1
+// fallback by Claude: Boost tcp::iostream + readlib, http only; always fails when built
+// without Boost) and on our own fetcher (wc::HttpsFetcher, what `wc --links` uses; robots
+// off, no cache). Cases 1-9 use a local fake web (tests/team/josh_fixture.py, python3,
 // 127.0.0.1). Case 10 is LIVE (real sites); it is skipped when offline or when
 // JOSH_TEST_OFFLINE=1. Cases 11-12 run in a child process with a deadline, so a hang
 // or a crash shows up as FAIL instead of freezing or killing this program.
@@ -28,7 +28,6 @@
 #include <vector>
 
 #include "net/https_fetcher.h"
-#include "net/stream_fetch.h"
 #include "team/josh.h"
 
 #ifndef JOSH_FIXTURE
@@ -349,11 +348,6 @@ int main(int argc, char** argv) {
     wc::HttpsFetcher ours_fetcher;  // what `wc --links` uses, minus robots.txt and cache
     ours_fetcher.use_robots(false);
     Subject josh = [](const std::string& u) { return josh_get_links(u); };
-    Subject stream = [](const std::string& u) {
-        JoshPage p;
-        p.links = wc::stream_get_links(u, &p.ok);
-        return p;
-    };
     Subject ours = [&](const std::string& u) {
         JoshPage p;
         if (auto l = ours_fetcher.links(u)) {
@@ -382,39 +376,32 @@ int main(int argc, char** argv) {
         {"16 threads at once", c12_parallel},
     };
 
-    const bool have_stream = wc::stream_fetch_built();
-    std::cout << "josh_get_links() vs stream_get_links() vs our fetcher, fake web at " << base << "\n";
-    if (!have_stream) std::cout << "stream column skipped: built without Boost\n";
-    std::cout << "\n" << pad("case", 30) << pad("josh", 6) << pad("stream", 8) << "ours\n";
-    int josh_fail = 0, ours_fail = 0, josh_pass = 0, ours_pass = 0, stream_fail = 0, stream_pass = 0;
+    std::cout << "josh_get_links() vs our fetcher, fake web at " << base << "\n";
+    std::cout << "\n" << pad("case", 30) << pad("josh", 6) << "ours\n";
+    int josh_fail = 0, ours_fail = 0, josh_pass = 0, ours_pass = 0;
     auto word = [](const std::string& r) { return r.empty() ? "PASS" : r.rfind("SKIP", 0) == 0 ? "SKIP" : "FAIL"; };
     int n = 0;
     for (const Case& c : cases) {
         ++n;
         std::string rj = c.fn(josh);
-        std::string rs = have_stream ? c.fn(stream) : "SKIP built without Boost";
         std::string ro = c.fn(ours);
-        std::string w1 = word(rj), ws = word(rs), w2 = word(ro);
-        // Case 10 hits https pages; the stream fetcher is http only by design (not counted).
-        if (c.fn == c10_live && ws == "FAIL") ws = "N/A";
-        std::cout << pad((n < 10 ? " " : "") + std::to_string(n) + " " + c.name, 30) << pad(w1, 6) << pad(ws, 8) << w2
-                  << "\n";
+        std::string w1 = word(rj), w2 = word(ro);
+        // Case 10 hits https pages; josh_get_links() is http only by design (not counted).
+        if (c.fn == c10_live && w1 == "FAIL") w1 = "N/A";
+        std::cout << pad((n < 10 ? " " : "") + std::to_string(n) + " " + c.name, 30) << pad(w1, 6) << w2 << "\n";
         if (w1 == "FAIL") std::cout << "     FAIL " << n << " josh: " << rj << "\n";
         if (w1 == "SKIP") std::cout << "     " << rj << "\n";
-        if (ws == "FAIL") std::cout << "     FAIL " << n << " stream: " << rs << "\n";
-        if (ws == "N/A")
-            std::cout << "     N/A " << n << " stream: http only by design, RoutedFetcher sends https to our TLS fetcher: "
-                      << rs << "\n";
+        if (w1 == "N/A")
+            std::cout << "     N/A " << n << " josh: http only by design, RoutedFetcher sends https to our TLS fetcher: "
+                      << rj << "\n";
         if (w2 == "FAIL") std::cout << "     FAIL " << n << " ours: " << ro << "\n";
         josh_fail += w1 == "FAIL";
         josh_pass += w1 == "PASS";
-        stream_fail += ws == "FAIL";
-        stream_pass += ws == "PASS";
         ours_fail += w2 == "FAIL";
         ours_pass += w2 == "PASS";
     }
-    std::cout << "\njosh: " << josh_pass << " PASS, " << josh_fail << " FAIL   stream: " << stream_pass << " PASS, "
-              << stream_fail << " FAIL   ours: " << ours_pass << " PASS, " << ours_fail << " FAIL\n";
+    std::cout << "\njosh: " << josh_pass << " PASS, " << josh_fail << " FAIL   ours: " << ours_pass << " PASS, "
+              << ours_fail << " FAIL\n";
 
     kill(fixture, SIGTERM);
     waitpid(fixture, nullptr, 0);

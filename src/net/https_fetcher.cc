@@ -231,8 +231,6 @@ std::optional<std::vector<std::string>> RoutedFetcher::links(const std::string& 
         return tls_.links(url);
     if (auto* t = dynamic_cast<HttpsFetcher*>(&tls_); t && t->handles_itself(url)) return tls_.links(url);
     if (auto r = josh_.links(url)) return r;
-    if (stream_)
-        if (auto r = stream_->links(url)) return r;
     return tls_.links(url);
 }
 
