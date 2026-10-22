@@ -116,6 +116,20 @@ int main(int argc, char** argv) {
     CHECK(pdf3.find("/XObject << /Im1 8 0 R >>") != std::string::npos);
     CHECK(pdf3.find("no screenshot") != std::string::npos);
 
+    ReportSummary cap = r;  // teammate screenshot: custom BRIDGES caption, app caption stays default
+    cap.bridges_caption = "BRIDGES (teammate)";
+    std::string pdf4 = summary_pdf(cap);
+    check_structure(pdf4);
+    CHECK(pdf4.find("(BRIDGES \\(teammate\\))") != std::string::npos);
+    CHECK(pdf4.find("(Our app)") != std::string::npos);
+
+    ReportSummary png = r;  // PNG bytes are not a JPEG: no image, box says why
+    png.bridges_jpg = "\x89PNG\r\n\x1a\n";
+    std::string pdf5 = summary_pdf(png);
+    check_structure(pdf5);
+    CHECK(pdf5.find("/XObject") == std::string::npos);
+    CHECK(pdf5.find("no screenshot") != std::string::npos);
+
     check_structure(summary_pdf(ReportSummary{}));
 
     if (argc > 1) {

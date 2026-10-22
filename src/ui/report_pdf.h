@@ -15,6 +15,7 @@ struct ReportSummary {
     long wall_ms = 0;
     std::string wall_note;            // "(live run, ...)" | "(cache replay, not live)" | "" (live run)
     std::string bridges_jpg, app_jpg;  // JPEG file bytes; "" = no picture
+    std::string bridges_caption = "BRIDGES", app_caption = "Our app";  // box titles (DIR/<box>_caption.txt)
 };
 
 std::string summary_pdf(const ReportSummary& r);

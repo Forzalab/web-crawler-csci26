@@ -88,6 +88,7 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 - Cache is on: a rerun replays from `.wc-cache/` and never touches the site. `--offline` = cache only.
 - Lost or old `summary.pdf`? `./a.out --report URL --bfs --offline` replays the crawl from the cache and writes all files again, PDF included.
 - Pictures for the PDF: `scripts/report_shots.sh DIR` (after a `--upload` run). It opens our TUI on the same site from the cache in tmux and screenshots the screen (`app.jpg`), screenshots the BRIDGES page from `bridges_url.txt` (`bridges.jpg`), then rewrites `summary.pdf` by cache replay (live wall time kept). Needs tmux, python3, node + Playwright Chromium (the cloud container has them); a missing one = that box stays empty. Extra flags pass through: `scripts/report_shots.sh DIR --pdf-link`.
+- Teammate picture instead (e.g. spec #3 = Logan's BRIDGES drawing): `scripts/report_shots.sh DIR --bridges-img FILE` and/or `--app-img FILE` (FILE path from the repo root, like DIR). That box uses FILE (JPEG as is; PNG etc -> JPEG via python3 PIL, else Playwright Chromium) and skips its screenshot; caption "BRIDGES (teammate)" / "Graph (teammate)" (`DIR/bridges_caption.txt` / `DIR/app_caption.txt`, first line). A run without the flag drops the old teammate picture and screenshots that box again; a FILE that cannot be converted (no PIL, no Chromium) = warning, same as no flag. Other flags still pass through: `scripts/report_shots.sh DIR --bridges-img logan.png --pdf-link`.
 - `--upload` posts `graph.json` through the gateway (needs `WC_GATEWAY_URL`, like `/bridges`) and writes `bridges_url.txt`.
 - `--pdf-link` posts `summary.pdf` to the gateway's `/api/pdf` and prints `PDF (24 h): <url>` on its own stdout line: opens in any browser, no scp. The link works for 24 h, then answers 410 (stored copy deleted by a daily sweep, so at most ~48 h on the server). Endpoint: `WC_PDF_URL`, else `WC_GATEWAY_URL` with `/api/bridges` -> `/api/pdf`; `WC_GATEWAY_TOKEN` as for `--upload`. Upload fails -> warning, exit 1, local PDF kept. Expired? `./a.out --report URL --bfs --offline --pdf-link` replays from the cache and shares a fresh link.
 - stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
@@ -103,7 +104,8 @@ Writes `DIR` (default `runs/<host>-<bfs|dfs|hybrid>/`, gitignored):
 | `failures.tsv` | url, status, error, label: `dead` (404/410/DNS/connect), `robots`, `429`, `redirect-loop`, `tls`, `timeout`, `bot-wall` (403, 202 with no links, JS_SHELL), `other` |
 | `graph.json` | `bridges_json(bridges_subset(g))`: at most 1000 nodes, BRIDGES GraphAdjacencyList |
 | `summary.pdf` | one printable page (US Letter): site, stats (fetched, failed, nodes, edges, blocked, wall time, cache), then the graph from BRIDGES and from our app (`bridges.jpg`, `app.jpg`; an empty box until `scripts/report_shots.sh` made them). Own tiny PDF writer (`src/ui/report_pdf.cc`), no dependencies |
-| `bridges.jpg`, `app.jpg` | `scripts/report_shots.sh DIR` only: screenshots of the BRIDGES page and of our TUI |
+| `bridges.jpg`, `app.jpg` | `scripts/report_shots.sh DIR` only: screenshots of the BRIDGES page and of our TUI (or the `--bridges-img` / `--app-img` file) |
+| `bridges_caption.txt`, `app_caption.txt` | `--bridges-img` / `--app-img` only: the box caption in `summary.pdf` |
 | `bridges_url.txt` | `--upload` only: the BRIDGES link |
 | `pdf_url.txt` | `--pdf-link` only: the 24 h PDF link |
 

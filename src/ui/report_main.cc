@@ -275,6 +275,12 @@ int report_main(int argc, char** argv) {
     if (carried) sum.wall_note = "(live run, " + utc(started, "%Y-%m-%d %H:%M UTC") + ")";
     else if (offline) sum.wall_note = "(cache replay, not live)";
     sum.bridges_jpg = slurp(out + "/bridges.jpg"), sum.app_jpg = slurp(out + "/app.jpg");  // scripts/report_shots.sh
+    auto caption = [&](const std::string& box, std::string& cap) {  // DIR/<box>_caption.txt: --bridges-img / --app-img
+        std::string c = slurp(out + "/" + box + "_caption.txt");
+        c = c.substr(0, c.find('\n'));
+        if (!c.empty()) cap = c;
+    };
+    caption("bridges", sum.bridges_caption), caption("app", sum.app_caption);
     const std::string pdf = summary_pdf(sum);
     std::ofstream(out + "/summary.pdf", std::ios::binary) << pdf;
     std::string pdf_url;
