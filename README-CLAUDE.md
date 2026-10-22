@@ -81,7 +81,7 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 (our fetcher + `.wc-cache/` + robots.txt + honest UA), but the spec path: sequential `crawl()`, 0.1 s sleep between requests.
 
 ```sh
-./a.out --report URL [--bfs|--dfs|--hybrid] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]
+./a.out --report URL [--bfs|--dfs|--hybrid] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link] [--logan]
 ```
 
 - A bare domain works (`--report espn.com`, also `--links` and the TUI): `https://` is tried first, and only if that start fetch gets no HTTP answer (TLS, CONNECT, DNS, TIMEOUT, IO) it switches to `http://` (`pick_start()`). A 404 or 403 is an answer and stays https; a typed `http://` or `https://` is never changed. Fixture and `--offline` runs skip the probe.
@@ -91,6 +91,7 @@ One headless crawl per site + mode, for the report (D2/D3). Same fetch stack as 
 - Teammate picture instead (e.g. spec #3 = Logan's BRIDGES drawing): `scripts/report_shots.sh DIR --bridges-img FILE` and/or `--app-img FILE` (FILE path from the repo root, like DIR). That box uses FILE (JPEG as is; PNG etc -> JPEG via python3 PIL, else Playwright Chromium) and skips its screenshot; caption "BRIDGES (teammate)" / "Graph (teammate)" (`DIR/bridges_caption.txt` / `DIR/app_caption.txt`, first line). A run without the flag drops the old teammate picture and screenshots that box again; a FILE that cannot be converted (no PIL, no Chromium) = warning, same as no flag. Other flags still pass through: `scripts/report_shots.sh DIR --bridges-img logan.png --pdf-link`.
 - `--upload` posts `graph.json` through the gateway (needs `WC_GATEWAY_URL`, like `/bridges`) and writes `bridges_url.txt`.
 - `--pdf-link` posts `summary.pdf` to the gateway's `/api/pdf` and prints `PDF (24 h): <url>` on its own stdout line: opens in any browser, no scp. The link works for 24 h, then answers 410 (stored copy deleted by a daily sweep, so at most ~48 h on the server). Endpoint: `WC_PDF_URL`, else `WC_GATEWAY_URL` with `/api/bridges` -> `/api/pdf`; `WC_GATEWAY_TOKEN` as for `--upload`. Upload fails -> warning, exit 1, local PDF kept. Expired? `./a.out --report URL --bfs --offline --pdf-link` replays from the cache and shares a fresh link.
+- `--logan` also draws the crawl with Logan's `logan_draw()` (spec #3, `src/team/logan.cc`) on `bridges_subset(g)`, posted through the gateway by our shim (`WC_GATEWAY_URL`, `WC_GATEWAY_TOKEN`, `WC_BRIDGES_SUB`; assignment = the number in his `Bridges(...)` call). OK -> `BRIDGES (logan): <url>` on stdout; no `WC_GATEWAY_URL` or a failed post -> one stderr line, the report is still written.
 - stdout: one summary line. stderr: one line per fetch (`[report N] LABEL cache=hit|miss links=K url`).
 - `WC_FIXTURE=file` crawls a fake web instead (`tests/report/run.sh`, offline, in `make test` and CI).
 
@@ -152,6 +153,7 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 src/core/       graph, LinkSource, Renderer, Sleeper, crawl(), tree (spanning tree)   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
 src/team/       josh.cc, logan.cc: Josh's and Logan's parts (plain C++; josh.cc is Claude's spec #1 fallback)
+src/team/bridges/  our BRIDGES shim for logan.cc: Bridges.h, GraphAdjList.h, Color.h (bridges-cxx names, no bridges-cxx code), posts via the gateway
 src/adapters/   JoshFetcher, LoganRenderer: glue from src/team/ to the crawler (teammates never edit)
 src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
