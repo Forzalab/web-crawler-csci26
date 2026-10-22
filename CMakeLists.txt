@@ -49,7 +49,6 @@ add_library(wc_net STATIC
   src/net/cache.cc
   src/net/robots.cc
   src/net/gateway.cc  # TUI /bridges: POST the graph to gateway/
-  src/net/stream_fetch.cc  # spec #1 fallback: Boost tcp::iostream + readlib (http only)
 )
 target_include_directories(wc_net PUBLIC src)
 target_link_libraries(wc_net PUBLIC wc_core)  # Sleeper
@@ -61,15 +60,12 @@ if(OPENSSL_FOUND)
 else()
   message(WARNING "OpenSSL not found: https:// fetches will fail (install libssl-dev)")
 endif()
-# Boost (header-only: asio + beast) for src/net/stream_fetch.cc, the spec #1 fetcher.
-# Optional: without it stream_fetch is a stub (always fails) and the build still works.
+# Boost (header-only: asio + beast) for src/team/josh.cc, spec #1 (wc and josh_test).
+# Optional: without it josh_get_links() is a stub (always fails) and the build still works.
 # Debian/Ubuntu: apt install libboost-dev.
 find_package(Boost 1.70 QUIET)
-if(Boost_FOUND)
-  target_compile_definitions(wc_net PRIVATE WC_HAVE_BOOST)
-  target_include_directories(wc_net PRIVATE ${Boost_INCLUDE_DIRS})
-else()
-  message(STATUS "Boost not found: spec #1 stream fetcher is a stub (install libboost-dev)")
+if(NOT Boost_FOUND)
+  message(STATUS "Boost not found: spec #1 josh_get_links() is a stub (install libboost-dev)")
 endif()
 
 # --- wc_ui_logic: pure TUI logic (no FTXUI): layout, replay, omnibar, osc52 -
@@ -111,11 +107,15 @@ add_executable(wc
   src/ui/matrix_demo.cc            # WC_MATRIX_DEMO=1 (hidden)
   src/adapters/josh_fetcher.cc
   src/adapters/logan_renderer.cc
-  src/team/josh.cc                 # #1 Josh writes here
+  src/team/josh.cc                 # #1 Josh's slot (spec #1 fallback by Claude)
   src/team/logan.cc                # #3 Logan writes here
 )
 target_link_libraries(wc PRIVATE wc_core wc_net wc_ui_views ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)
+if(Boost_FOUND)
+  target_compile_definitions(wc PRIVATE WC_HAVE_BOOST)
+  target_include_directories(wc PRIVATE ${Boost_INCLUDE_DIRS})
+endif()
 
 # --- unit tests (no network): tests/unit/ ------------------------------------
 add_executable(wc_net_test tests/unit/net_test.cc)
@@ -156,8 +156,12 @@ target_link_libraries(test_bridges_json PRIVATE wc_core)
 target_compile_options(test_bridges_json PRIVATE -Wall -Wextra)
 
 # --- josh_test: 12 checks for josh_get_links() vs our fetcher (make josh) ---
-# Not in `make`, `make test` or CI: on main josh.cc is still the stub.
+# Not in `make`, `make test` or CI: case 10 is live (real sites).
 add_executable(josh_test EXCLUDE_FROM_ALL tests/team/josh_test.cc src/team/josh.cc)
 target_link_libraries(josh_test PRIVATE wc_net wc_core)
 target_compile_definitions(josh_test PRIVATE JOSH_FIXTURE="${CMAKE_SOURCE_DIR}/tests/team/josh_fixture.py")
 target_compile_options(josh_test PRIVATE -Wall -Wextra)
+if(Boost_FOUND)
+  target_compile_definitions(josh_test PRIVATE WC_HAVE_BOOST)
+  target_include_directories(josh_test PRIVATE ${Boost_INCLUDE_DIRS})
+endif()

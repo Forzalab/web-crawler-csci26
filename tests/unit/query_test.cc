@@ -114,18 +114,18 @@ static void test_osc52() {
     CHECK_EQ(osc52(""), std::string("\x1b]52;c;\x07"));
 }
 
-static int yn(char c, bool def) {  // -1 = ignored, else 0/1
+static int yes_no(char c, bool def) {  // -1 = ignored, else 0/1
     auto r = yes_no_answer(c, def);
     return r ? int(*r) : -1;
 }
 
 static void test_yes_no() {
-    for (char c : {'y', 'Y'}) CHECK_EQ(yn(c, false), 1);  // no Enter needed
-    for (char c : {'n', 'N'}) CHECK_EQ(yn(c, true), 0);
-    CHECK_EQ(yn('\n', true), 1);  // Enter = default
-    CHECK_EQ(yn('\n', false), 0);
-    CHECK_EQ(yn('x', true), -1);  // anything else is ignored
-    CHECK_EQ(yn(0, false), -1);
+    for (char c : {'y', 'Y'}) CHECK_EQ(yes_no(c, false), 1);  // no Enter needed
+    for (char c : {'n', 'N'}) CHECK_EQ(yes_no(c, true), 0);
+    CHECK_EQ(yes_no('\n', true), 1);  // Enter = default
+    CHECK_EQ(yes_no('\n', false), 0);
+    CHECK_EQ(yes_no('x', true), -1);  // anything else is ignored
+    CHECK_EQ(yes_no(0, false), -1);
 }
 
 static void test_bridges_url_example() {

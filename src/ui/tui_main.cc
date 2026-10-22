@@ -41,7 +41,6 @@
 #include "net/cache.h"
 #include "net/gateway.h"
 #include "net/https_fetcher.h"
-#include "net/stream_fetch.h"
 #include "net/url.h"
 #include "ui/anim.h"
 #include "ui/camera.h"
@@ -201,12 +200,11 @@ int tui_main(int argc, char** argv) {
 
     // Crawl: the worker owns the fetchers and graph until done; main thread joins.
     JoshFetcher josh;
-    StreamFetcher stream;  // spec #1 fallback for http://
     HttpsFetcher tls;
     PageCache cache(".wc-cache");
     tls.use_cache(&cache, false, false);
     tls.use_robots(true);
-    RoutedFetcher routed(josh, stream, tls);
+    RoutedFetcher routed(josh, tls);
     RealSleeper sleeper;
     NoSleeper no_sleep;
     auto fixture = fixture_source_from_env();  // WC_FIXTURE=file: fake web, no network (tests/smoke)

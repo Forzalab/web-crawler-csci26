@@ -55,7 +55,7 @@ Output: `MODE`, `FETCH`, `NODE` and `EDGE` lines, then the `NODES` / `EDGES` / `
 ```
 
 stderr shows `[fetch] via=tls status=... redirects=... final=... error=...`.
-`https://` always goes to our fetcher (`src/net/`); `http://` goes to Josh's adapter first, then to the spec #1 stream fetcher (`src/net/stream_fetch.cc`, `[fetch] via=stream`), then to ours.
+`https://` always goes to our fetcher (`src/net/`); `http://` goes to Josh's adapter first (`src/team/josh.cc`, spec #1, `[fetch] via=josh`), then to ours.
 Needs OpenSSL dev headers for https (`apt install libssl-dev`); without them it still builds and https fetches fail with `tls: built without OpenSSL`.
 Certificates are verified against the system CA store (`SSL_CERT_FILE=...` points OpenSSL at another bundle).
 
@@ -135,8 +135,8 @@ build/test_bridges_json tests/bridges/golden            # BRIDGES JSON golden fi
 build/test_bridges_json tests/bridges/golden --update   # rewrite them after a format change
 ```
 
-Josh's `josh_get_links()`: `make josh` builds `build/josh_test` and runs 12 cases against his `src/team/josh.cc` and, side by side, our `HttpsFetcher` (same expectations). Cases 1-9 use a local fake web (`tests/team/josh_fixture.py`, needs python3); case 10 is LIVE (Wikipedia + `http://wowcubedocs.com/`), skipped offline or with `JOSH_TEST_OFFLINE=1`; cases 11 (a server that connects but never answers, 15 s deadline) and 12 (16 threads at once, like the TUI) run in a child process, so a hang or crash prints FAIL instead of freezing the test.
-Each row says PASS/FAIL per side, with a one-line reason under a FAIL. Exit 0 = all of Josh's cases pass. Not part of `make test` or CI (on main josh.cc is still the stub).
+Josh's `josh_get_links()`: `make josh` builds `build/josh_test` and runs 12 cases against `src/team/josh.cc` and, side by side, our `HttpsFetcher` (same expectations). Cases 1-9 use a local fake web (`tests/team/josh_fixture.py`, needs python3); case 10 is LIVE (Wikipedia + `http://wowcubedocs.com/`), skipped offline or with `JOSH_TEST_OFFLINE=1`; cases 11 (a server that connects but never answers, 15 s deadline) and 12 (16 threads at once, like the TUI) run in a child process, so a hang or crash prints FAIL instead of freezing the test.
+Each row says PASS/FAIL per side, with a one-line reason under a FAIL. Exit 0 = all of Josh's cases pass. Case 10's https page is N/A for josh (http only by design). Not part of `make test` or CI (case 10 is live).
 `make spec1`: static check (sed/grep, no compiler) that `src/team/josh.cc` does spec #1 the professor's way: boost header + `tcp::iostream`/`beast::tcp_stream`, readlib `read.h` + `readline(stream)`, its own `GET` request, none of our fetch code (`net/http.h`, `HttpClient`, ...; our `url.h` / `html_links.h` parsers are fine). Comments and strings are stripped first. A missing timeout (`expires_after`) is only a WARN. Any file: `tests/team/spec1_check.sh FILE [--func NAME]`.
 `make josh-full` = `make spec1` then `make josh`. The checker's own self-test (`tests/team/spec1_selftest.sh`, samples in `tests/team/spec1_samples/`) is part of `make test`.
 
@@ -149,7 +149,7 @@ Prints PASS or FAIL per rung and a summary. CI runs the same script on every pus
 ```
 src/core/       graph, LinkSource, Renderer, Sleeper, crawl(), tree (spanning tree)   (no I/O, no deps)
 src/core/crawl.cc   #2 traversal: TODO(Tony), currently a stub
-src/team/       josh.cc, logan.cc: Josh and Logan write their parts here (plain C++)
+src/team/       josh.cc, logan.cc: Josh's and Logan's parts (plain C++; josh.cc is Claude's spec #1 fallback)
 src/adapters/   JoshFetcher, LoganRenderer: glue from src/team/ to the crawler (teammates never edit)
 src/net/        our fetch path: url, html_links, http (sockets + OpenSSL), HttpsFetcher (redirects), RoutedFetcher, PageCache, robots
 src/mocks/      MockFetcher (fake web + A3 parser), MockRenderer (text / DOT)
@@ -168,13 +168,12 @@ third_party/ftxui   FTXUI v7.0.3, vendored, MIT (see its LICENSE)
 
 | Part | Owner | Where it plugs in |
 |---|---|---|
-| #1 fetch a page, return its URLs | Josh | `src/team/josh.cc`: `josh_get_links(url)` |
-| #1 emergency fallback (spec #1 as written) | Claude | `src/net/stream_fetch.cc`: `stream_get_links(url, &ok)` |
+| #1 fetch a page, return its URLs | Josh's slot; fallback written by Claude | `src/team/josh.cc`: `josh_get_links(url)` |
 | #2 graph traversal, BFS + DFS | Tony | `src/core/crawl.cc` |
 | Hybrid traversal (BFS layers + trie order) | Claude | `src/core/crawl_hybrid.cc` |
 | #3 BRIDGES rendering | Logan | `src/team/logan.cc`: `logan_draw(nodes, edges)` |
 
-`stream_get_links()` is spec #1 done the way Kerney's demo does it: Boost `tcp::iostream` (10 s deadline) + readlib `readline()` (vendored, `third_party/readlib/`, GPL-3.0), follows up to 5 redirects, de-chunks, links via our HTML parser. http only: https, or a redirect to it, is ok=false and our TLS fetcher takes it. Needs `libboost-dev` (header-only); without Boost it is a stub that always fails. `make josh` shows it as the `stream` column.
+Josh's version never landed, so `josh_get_links()` is Claude's spec #1 fallback, done the way Kerney's demo does it: Boost `tcp::iostream` (10 s deadline) + readlib `readline()` (vendored, `third_party/readlib/`, GPL-3.0), follows up to 5 redirects, de-chunks, links via our HTML parser. http only: https, or a redirect to it, is ok=false and our TLS fetcher takes it. Needs `libboost-dev` (header-only); without Boost it is a stub that always fails. `make josh` shows it as the `josh` column.
 
 Josh and Logan each fill in one function in `src/team/`, using plain `vector`, `string` and small structs. The `.h` files there say exactly what goes in and what comes out. The glue in `src/adapters/` turns those into the crawler's types, so nobody else's code needs to change.
 
