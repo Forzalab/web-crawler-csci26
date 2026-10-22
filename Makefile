@@ -20,6 +20,7 @@ unit: all
 	NO_COLOR=1 $(BUILD)/wc_views_test
 	$(BUILD)/wc_matrix_test
 	$(BUILD)/wc_report_pdf_test
+	$(BUILD)/wc_logan_shim_test
 	$(BUILD)/test_bridges_json tests/bridges/golden
 
 # BFS empty-queue regression only (also part of `make unit`)

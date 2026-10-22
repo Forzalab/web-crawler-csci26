@@ -47,6 +47,7 @@ jobs:
           build/wc_ui_test
           build/wc_query_test
           NO_COLOR=1 build/wc_views_test
+          build/wc_logan_shim_test
 
       - name: Report mode (wc --report, offline fixture)
         run: |
