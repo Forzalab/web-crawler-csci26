@@ -29,6 +29,7 @@ crawl-regress: all
 test: unit
 	tests/team/spec1_selftest.sh -q
 	tests/report/run.sh $(BUILD)/wc
+	tests/report/teammate_img.sh $(BUILD)/wc
 	tests/run.sh $(BUILD)/wc tests/crawl
 
 # TUI smoke suite (tests/smoke/): drives build/wc in tmux panes. FILTER = regex on case names.

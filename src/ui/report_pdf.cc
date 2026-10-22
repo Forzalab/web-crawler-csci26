@@ -143,8 +143,8 @@ std::string summary_pdf(const ReportSummary& r) {
                        " /BitsPerComponent 8 /Filter /DCTDecode /Length " + std::to_string(jpg.size()) + " >>\nstream\n" +
                        jpg + "\nendstream");
     };
-    picture("BRIDGES", r.bridges_jpg);
-    picture("Our app", r.app_jpg);
+    picture(r.bridges_caption, r.bridges_jpg);
+    picture(r.app_caption, r.app_jpg);
 
     // Objects: 1 catalog, 2 pages, 3 page, 4 contents, 5-7 fonts, 8.. images.
     std::string images;
