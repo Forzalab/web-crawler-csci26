@@ -2,15 +2,14 @@
 # tests/report/teammate_img.sh [BIN] - offline check of scripts/report_shots.sh --bridges-img / --app-img.
 # A PNG (converted) for BRIDGES and a JPEG (copied) for our app go into summary.pdf as 2 images with
 # "(teammate)" captions. Both boxes are swapped, so no TUI/BRIDGES screenshots are taken.
-# SKIP (exit 0) if neither python3 PIL nor node + playwright can convert the PNG.
+# Neither python3 PIL nor node + playwright: BRIDGES gets the JPEG too (PNG conversion SKIPped).
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 BIN=${1:-build/wc}
 [ -x "$BIN" ] || { echo "no binary at $BIN (run make first)"; exit 2; }
 export NODE_PATH=${NODE_PATH:-$(npm root -g 2> /dev/null)}
-if ! python3 -c 'import PIL' 2> /dev/null && ! node -e 'require("playwright")' 2> /dev/null; then
-    echo "SKIP teammate_img: no python3 PIL and no node + playwright"; exit 0
-fi
+conv=1  # no PIL and no Chromium: JPEG only (copied, needs no converter); the PNG case is skipped
+python3 -c 'import PIL' 2> /dev/null || node -e 'require("playwright")' 2> /dev/null || conv=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export WC_FIXTURE=tests/crawl/inputfile9
@@ -24,7 +23,8 @@ open(sys.argv[1], "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(
                               + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 PY
 python3 -c 'import sys; open(sys.argv[1], "wb").write(b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x10\x00\x20\x03" + b"\x01" * 9 + b"\xff\xd9")' "$tmp/y.jpg"
-BIN=$BIN scripts/report_shots.sh "$tmp/r" --bridges-img "$tmp/x.png" --app-img "$tmp/y.jpg" > "$tmp/shots.log" 2>&1
+[ "$conv" = 1 ] && b=$tmp/x.png || { b=$tmp/y.jpg; echo "SKIP teammate_img PNG: no python3 PIL and no node + playwright"; }
+BIN=$BIN scripts/report_shots.sh "$tmp/r" --bridges-img "$b" --app-img "$tmp/y.jpg" > "$tmp/shots.log" 2>&1
 if python3 - "$tmp" <<'PY'
 import sys
 t = sys.argv[1]
@@ -34,4 +34,4 @@ assert b"(BRIDGES \\(teammate\\))" in pdf and b"(Graph \\(teammate\\))" in pdf, 
 assert open(t + "/r/bridges.jpg", "rb").read(2) == b"\xff\xd8", "bridges.jpg is not a JPEG"
 assert open(t + "/r/app.jpg", "rb").read() == open(t + "/y.jpg", "rb").read(), "app.jpg not copied as-is"
 PY
-then echo "PASS teammate_img: PNG + JPEG embedded with teammate captions"; else echo "FAIL teammate_img"; cat "$tmp/shots.log"; exit 1; fi
+then echo "PASS teammate_img: $(basename "$b") + y.jpg embedded with teammate captions"; else echo "FAIL teammate_img"; cat "$tmp/shots.log"; exit 1; fi
