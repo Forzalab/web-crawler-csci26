@@ -4,6 +4,7 @@
 //   --bfs | --dfs | --hybrid   --depth N (3)   --size N (1000)   --out DIR (runs/<host>-<bfs|dfs|hybrid>/)
 //   --cache DIR (.wc-cache)   --offline (cache only)   --upload (needs WC_GATEWAY_URL)
 //   --pdf-link: share summary.pdf for 24 h via the gateway (WC_PDF_URL, else WC_GATEWAY_URL)
+//   --logan: also draw it with Logan's logan_draw() (spec #3, src/team/logan.cc) via the gateway (WC_GATEWAY_URL)
 // WC_FIXTURE=file: fake web instead of the network (tests/report/), no sleeps.
 // Writes DIR/stats.json, DIR/failures.tsv, DIR/graph.json, DIR/summary.pdf (+ DIR/bridges_url.txt on --upload,
 // DIR/pdf_url.txt on --pdf-link).
@@ -20,6 +21,7 @@
 #include <random>
 
 #include "adapters/josh_fetcher.h"
+#include "adapters/logan_renderer.h"
 #include "bridges/bridges_json.h"
 #include "core/crawl.h"
 #include "core/crawl_hybrid.h"
@@ -147,7 +149,7 @@ int report_main(int argc, char** argv) {
     CrawlConfig cfg;
     cfg.maxDepth = kDefaultDepth;
     cfg.maxSize = kDefaultLinks;
-    bool upload = false, offline = false, pdf_link = false;
+    bool upload = false, offline = false, pdf_link = false, logan = false;
     for (int i = 1; i < argc; ++i) {
         bool has_arg = i + 1 < argc;
         if (!std::strcmp(argv[i], "--report") && has_arg) url = argv[++i];
@@ -161,9 +163,10 @@ int report_main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--upload")) upload = true;
         else if (!std::strcmp(argv[i], "--offline")) offline = true;
         else if (!std::strcmp(argv[i], "--pdf-link")) pdf_link = true;
+        else if (!std::strcmp(argv[i], "--logan")) logan = true;
     }
     if (url.empty() || cfg.maxDepth < 0 || cfg.maxSize < 1) {
-        std::cerr << "usage: wc --report URL [--bfs|--dfs|--hybrid] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link]\n";
+        std::cerr << "usage: wc --report URL [--bfs|--dfs|--hybrid] [--depth 3] [--size 50] [--out DIR] [--cache DIR] [--offline] [--upload] [--pdf-link] [--logan]\n";
         return 2;
     }
     const std::string mode = cfg.mode == Mode::BFS ? "bfs" : cfg.mode == Mode::DFS ? "dfs" : "hybrid";
@@ -247,6 +250,7 @@ int report_main(int argc, char** argv) {
 
     const std::string json = bridges_json(bridges_subset(g));
     std::ofstream(out + "/graph.json") << json << '\n';
+    if (logan) LoganRenderer().render(bridges_subset(g));  // no WC_GATEWAY_URL -> one stderr line, report still written
 
     std::string link;
     if (upload) {
@@ -275,6 +279,12 @@ int report_main(int argc, char** argv) {
     if (carried) sum.wall_note = "(live run, " + utc(started, "%Y-%m-%d %H:%M UTC") + ")";
     else if (offline) sum.wall_note = "(cache replay, not live)";
     sum.bridges_jpg = slurp(out + "/bridges.jpg"), sum.app_jpg = slurp(out + "/app.jpg");  // scripts/report_shots.sh
+    auto caption = [&](const std::string& box, std::string& cap) {  // DIR/<box>_caption.txt: --bridges-img / --app-img
+        std::string c = slurp(out + "/" + box + "_caption.txt");
+        c = c.substr(0, c.find('\n'));
+        if (!c.empty()) cap = c;
+    };
+    caption("bridges", sum.bridges_caption), caption("app", sum.app_caption);
     const std::string pdf = summary_pdf(sum);
     std::ofstream(out + "/summary.pdf", std::ios::binary) << pdf;
     std::string pdf_url;

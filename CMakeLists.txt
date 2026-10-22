@@ -109,7 +109,9 @@ add_executable(wc
   src/adapters/logan_renderer.cc
   src/team/josh.cc                 # #1 Josh's slot (spec #1 fallback by Claude)
   src/team/logan.cc                # #3 Logan writes here
+  src/team/bridges/Bridges.cc      # our BRIDGES shim for logan.cc (posts via gateway/, no bridges-cxx)
 )
+target_include_directories(wc PRIVATE src/team/bridges)  # #include "Bridges.h" etc. in logan.cc
 target_link_libraries(wc PRIVATE wc_core wc_net wc_ui_views ftxui::component ftxui::dom ftxui::screen)
 target_compile_options(wc PRIVATE -Wall -Wextra)
 if(Boost_FOUND)
@@ -146,7 +148,10 @@ add_executable(wc_matrix_test tests/unit/matrix_test.cc)  # matrix rain
 target_link_libraries(wc_matrix_test PRIVATE wc_ui_views)
 add_executable(wc_report_pdf_test tests/unit/report_pdf_test.cc)  # summary.pdf writer
 target_link_libraries(wc_report_pdf_test PRIVATE wc_ui_logic)
-foreach(t wc_report_pdf_test wc_ui_test wc_query_test wc_views_test wc_matrix_test)
+add_executable(wc_logan_shim_test tests/unit/logan_shim_test.cc src/team/bridges/Bridges.cc)  # BRIDGES shim JSON
+target_include_directories(wc_logan_shim_test PRIVATE src/team/bridges)
+target_link_libraries(wc_logan_shim_test PRIVATE wc_net)
+foreach(t wc_logan_shim_test wc_report_pdf_test wc_ui_test wc_query_test wc_views_test wc_matrix_test)
   target_compile_options(${t} PRIVATE -Wall -Wextra)
 endforeach()
 
