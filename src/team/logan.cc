@@ -1,7 +1,10 @@
-#include "team/logan.h"
-
+#include "logan.h"
+#include "../../bridges-cxx/src/Bridges.h"
+#include "../../bridges-cxx/src/GraphAdjList.h"
+#include "../../bridges-cxx/src/Color.h"
 #include <iostream>
 using namespace std;
+using namespace bridges;
 
 // TODO(Logan): draw the graph on BRIDGES.
 //   nodes.at(i) = one page. Color it by depth (0 red, 1 orange, 2 yellow, 3 green, ...).
@@ -23,6 +26,40 @@ using namespace std;
 //     Draw: A red. B orange. C orange (failed).
 //           A -> B.  A -> C.  B -> A bold (back link).
 void logan_draw(const vector<LoganNode>& nodes, const vector<LoganEdge>& edges) {
-    cerr << "[logan_draw] not written yet: " << nodes.size() << " nodes, "
-         << edges.size() << " edges" << endl;
+	string username = "";//insert you username here
+	string API_key = "";//insert your API key
+	bridges::GraphAdjList<int, LoganNode, LoganEdge> graph;
+	for(int i = 0; i < nodes.size(); i++) {
+		graph.addNode(i, nodes.at(i));
+		if(nodes.at(i).depth == 0) {
+			graph.getNode(i)->getVisualizer()->setColor(Color("red"));
+		}
+		else if(nodes.at(i).depth == 1) {
+			graph.getNode(i)->getVisualizer()->setColor(Color("orange"));
+		}
+		else if(nodes.at(i).depth == 2) {
+			graph.getNode(i)->getVisualizer()->setColor(Color("yellow"));
+		}
+		else if(nodes.at(i).depth == 3) {
+			graph.getNode(i)->getVisualizer()->setColor(Color("green"));
+		}
+		else {
+			graph.getNode(i)->getVisualizer()->setColor(Color("blue"));
+		}
+		if(nodes.at(i).failed) {
+			graph.getNode(i)->getVisualizer()->setShape(Shape::TRIANGLE);
+		}
+		graph.getNode(i)->setLabel(nodes.at(i).url);
+	}
+
+	for(const auto& edge : edges) {
+		graph.addEdge(edge.from, edge.to, edge);
+		if(edge.back_link) {
+		graph.addEdge(edge.from, edge.to, edge)->getVisualizer()->setThickness(5.0F);
+		}
+	}
+	Bridges bridges(6742069, username, API_key);
+	bridges.setDataStructure(&graph);
+	bridges.visualize();
+
 }
