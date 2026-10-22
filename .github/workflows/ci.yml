@@ -20,7 +20,7 @@ jobs:
 
       # libssl-dev = https in src/net (PR #3). The runner image has it today;
       # installing it here keeps that true if the image changes.
-      # libboost-dev = spec #1 stream fetcher (src/net/stream_fetch.cc); optional, stub without it.
+      # libboost-dev = spec #1 josh_get_links() (src/team/josh.cc); optional, stub without it.
       # No libcurl: we never link bridges-cxx (the gateway posts to BRIDGES).
       - name: Install deps
         continue-on-error: true   # apt hiccup must not block; the check below warns

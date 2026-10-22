@@ -73,7 +73,7 @@ public:
     std::optional<std::vector<std::string>> links(const std::string& url) override;
     FetchResult last() const;                            // result of the latest links()
     std::string label_of(const std::string& url) const;  // status_label of links(url); "" = never asked
-    // true = answer this url here, not via Josh / stream: robots.txt blocks it,
+    // true = answer this url here, not via Josh: robots.txt blocks it,
     // it is cached (so replays match) or we are offline. RoutedFetcher asks first.
     bool handles_itself(const std::string& url);
 
@@ -100,19 +100,15 @@ private:
     std::unordered_map<std::string, std::unique_ptr<std::mutex>> host_gate_;    // paced host: one request at a time
 };
 
-// https:// -> tls. http:// -> josh first; if Josh fails (or is not wired yet,
-// or the site 308s to https) -> stream (spec #1 fallback, if given) -> tls.
-// Josh's plug-in takes over http:// once it works.
+// https:// -> tls. http:// -> josh first; if Josh fails (or the site 308s to https) -> tls.
 // Robots, cache and offline still apply: an HttpsFetcher tls that handles_itself(url) answers.
 class RoutedFetcher : public LinkSource {
 public:
     RoutedFetcher(LinkSource& josh, LinkSource& tls) : josh_(josh), tls_(tls) {}
-    RoutedFetcher(LinkSource& josh, LinkSource& stream, LinkSource& tls) : josh_(josh), stream_(&stream), tls_(tls) {}
     std::optional<std::vector<std::string>> links(const std::string& url) override;
 
 private:
     LinkSource& josh_;
-    LinkSource* stream_ = nullptr;
     LinkSource& tls_;
 };
 
