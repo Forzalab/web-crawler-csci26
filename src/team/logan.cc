@@ -1,7 +1,7 @@
 #include "logan.h"
-#include "../../bridges-cxx/src/Bridges.h"
-#include "../../bridges-cxx/src/GraphAdjList.h"
-#include "../../bridges-cxx/src/Color.h"
+#include "Bridges.h"
+#include "GraphAdjList.h"
+#include "Color.h"
 #include <iostream>
 using namespace std;
 using namespace bridges;
