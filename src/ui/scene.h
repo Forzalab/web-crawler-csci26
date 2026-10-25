@@ -58,7 +58,7 @@ Scene make_scene(const CrawlGraph& g, Layout lay);  // given layout (tests)
 // Zooming out never shrinks it: edges get shorter, the screen holds more of them.
 int lod_budget(int cols, int rows, double zoom);
 // SEEN back-links get this share of the budget the tree edges left (grey edges stay sparse).
-constexpr double kSeenShare = 0.5;
+constexpr double kSeenShare = 0.25;
 // Deepest labelled depth: < 2.5 -> 1, < 5 -> 2, else every depth.
 int lod_label_depth(double zoom);
 

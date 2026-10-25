@@ -100,8 +100,10 @@ private:
 // Traffic pulses on SEEN edges (graph(), pulse_ms >= 0, replay done).
 constexpr int kPulsePeriodMs = 1500;  // one time slot per lane: at most one pulse each
 constexpr int kPulseTravelMs = 800;   // a pulse runs a -> b in this long, then is gone
-constexpr int kPulseLanes = 3;        // most pulses at once (lanes staggered by period / lanes)
-constexpr int kPulseDots = 3;         // pulse length, in dots
+constexpr int kPulseLanes = 6;        // most pulses at once (lanes staggered by period / lanes)
+constexpr int kPulseDots = 4;         // pulse length, in dots
+constexpr double kSeenDim = 0.35;      // SEEN edges: target depth colour, this much toward black
+constexpr double kFlashMs = 300;       // a landed edge cools white-hot -> its colour in this long
 constexpr uint64_t kPulseSkip = 3;    // 1 slot in kPulseSkip stays empty: "sometimes"
 // Volcano replay (graph(), content ms): shockwave per erupting ring, lava cooling per node.
 constexpr double kShockMs = 700;
@@ -171,7 +173,7 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
         };
         const int budget = lod_budget(c.width() / 2, c.height() / 4, zoom);
         int spent = 0, tree_spent = 0, seen_spent = 0;
-        std::vector<size_t> drawn_seen;  // SEEN edges on screen, for the pulses
+        std::vector<size_t> on_screen;  // edges drawn, for the pulses
         for (size_t i = 0; i < scene->order.size(); ++i) {
             if (int(i) >= scene->n_always && spent >= budget) break;
             if (int(i) == scene->n_tree) tree_spent = spent;
@@ -182,25 +184,35 @@ Element graph(std::shared_ptr<const Scene> scene, ReplayFrame f, View v, double 
             float t = std::clamp(f.edge_t[e], 0.0f, 1.0f);
             int a = plan.from[e], b = plan.to[e];
             if (t <= 0 || !shown(a) || !shown(b)) continue;
-            Color col = seen ? th::kFaint : th::depth_color(std::max(1, g.nodes[b].depth), scene->max_depth);
+            const int bd = std::max(1, g.nodes[b].depth);
+            Color col = !seen ? th::depth_color(bd, scene->max_depth)
+                        : lava ? th::to_color(anim::mix(th::depth_rgb(bd, scene->max_depth), {0, 0, 0}, kSeenDim))
+                               : th::kFaint;
+            // Flash: a just-landed edge starts white-hot and cools to its colour.
+            const double age = f.ms - (plan.start[e] + plan.edge_ms);
+            if (lava && t >= 1 && plan.start[e] >= 0 && age >= 0 && age < kFlashMs)
+                col = th::to_color(anim::mix(th::depth_rgb(0, 1), th::depth_rgb(bd, scene->max_depth), age / kFlashMs));
             const bool drew = edge(sx(a), sy(a), sx(b), sy(b), t, col);
             // Lava bomb: the child flies out from its parent, a white-hot dot at the edge tip.
             if (lava && drew && !seen && t < 1)
                 c.DrawPoint(int(std::lround(sx(a) + (sx(b) - sx(a)) * t)), int(std::lround(sy(a) + (sy(b) - sy(a)) * t)),
                             true, th::to_color(th::depth_rgb(0, 1)));
             spent += drew;
-            if (seen && drew) ++seen_spent, drawn_seen.push_back(e);
+            if (seen && drew) ++seen_spent;
+            if (drew) on_screen.push_back(e);
         }
-        // Traffic: once the replay is done, a few drawn SEEN edges carry a short
-        // bright run a -> b. Lane k picks an edge per time slot (hash), staggered.
-        if (f.done && pulse_ms >= 0 && !drawn_seen.empty()) {
-            const Color pc = th::to_color(anim::mix(th::rgb::kChrome, th::rgb::kText, 0.5));
+        // Traffic: once the replay is done, a few drawn edges carry a short bright run
+        // a -> b in their target's colour. Lane k picks an edge per time slot (hash), staggered.
+        if (f.done && pulse_ms >= 0 && !on_screen.empty()) {
             for (int k = 0; k < kPulseLanes; ++k) {
                 const int64_t at = pulse_ms + int64_t(k) * kPulsePeriodMs / kPulseLanes;
                 const int64_t phase = at % kPulsePeriodMs;
                 const uint64_t h = pulse_hash(uint64_t(at / kPulsePeriodMs), uint64_t(k));
                 if (phase >= kPulseTravelMs || h % kPulseSkip == 0) continue;
-                const size_t e = drawn_seen[size_t(h / kPulseSkip % drawn_seen.size())];
+                const size_t e = on_screen[size_t(h / kPulseSkip % on_screen.size())];
+                const Color pc = lava ? th::to_color(anim::mix(th::depth_rgb(std::max(1, g.nodes[size_t(plan.to[e])].depth),
+                                                                             scene->max_depth), th::rgb::kText, 0.3))
+                                      : th::to_color(anim::mix(th::rgb::kChrome, th::rgb::kText, 0.5));
                 const double ax = sx(plan.from[e]), ay = sy(plan.from[e]);
                 const double dx = sx(plan.to[e]) - ax, dy = sy(plan.to[e]) - ay;
                 const int n = int(std::lround(std::max(std::abs(dx), std::abs(dy))));

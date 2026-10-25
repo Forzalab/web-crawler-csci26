@@ -42,7 +42,11 @@ struct FetchResult {
 // JS_SHELL (OK page with `links` == 0 that mentions JavaScript: probably needs a browser).
 std::string status_label(const FetchResult& r, long links = -1);
 
-// The start URL a person typed. A scheme is kept as typed. A bare domain tries https://
+// Url::str() form ("https://x.com" -> "https://x.com/"), so the root matches links back to it.
+// Not a URL -> unchanged.
+std::string normalize_start(const std::string& url);
+
+// The start URL a person typed, normalized (normalize_start). A scheme is kept as typed. A bare domain tries https://
 // through `probe`; no HTTP response at all (TLS, CONNECT, DNS, TIMEOUT, IO, ...) switches
 // to http:// (one stderr line). An HTTP status is an answer: stays https.
 std::string pick_start(const std::string& typed, const std::function<FetchResult(const std::string&)>& probe);

@@ -190,7 +190,7 @@ int report_main(int argc, char** argv) {
     tls.use_robots(true);
     RoutedFetcher routed(josh, tls);
     auto fixture = fixture_source_from_env();
-    if (!fixture) url = offline ? with_scheme(url) : pick_start(url, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
+    if (!fixture) url = offline ? normalize_start(with_scheme(url)) : pick_start(url, [&](const std::string& u) { return tls.fetch(u); });  // probe fills the cache
     if (out.empty()) {
         auto u = parse_url(url);
         out = "runs/" + (u && !u->host.empty() ? u->host : std::string("site")) + "-" + mode;

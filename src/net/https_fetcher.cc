@@ -29,8 +29,13 @@ std::string status_label(const FetchResult& r, long links) {
     return kind;
 }
 
+std::string normalize_start(const std::string& url) {
+    std::optional<Url> u = parse_url(url);
+    return u ? u->str() : url;
+}
+
 std::string pick_start(const std::string& typed, const std::function<FetchResult(const std::string&)>& probe) {
-    std::string https = with_scheme(typed);
+    std::string https = normalize_start(with_scheme(typed));
     if (typed.find("://") != std::string::npos) return https;  // typed scheme: never probed
     std::string label = status_label(probe(https));
     if (label != "TLS" && label != "CONNECT" && label != "DNS" && label != "TIMEOUT" && label != "IO") return https;

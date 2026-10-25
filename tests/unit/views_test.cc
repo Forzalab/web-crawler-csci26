@@ -314,7 +314,7 @@ static void test_pulse() {
         (n ? lit : dark)++, most = std::max(most, n);
     }
     CHECK(lit > 0 && dark > 0, std::to_string(lit) + " lit, " + std::to_string(dark) + " dark");
-    CHECK(most <= 9, "pulse cells: " + std::to_string(most));
+    CHECK(most <= 24, "pulse cells: " + std::to_string(most));
     CHECK(!orange, "pulse in accent orange");
     ReplayFrame mid = k.f;
     mid.done = false;
