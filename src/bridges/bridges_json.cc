@@ -19,8 +19,6 @@ const Rgba kHop[] = {
     {255, 0, 0, 255}, {255, 165, 0, 255}, {255, 255, 0, 255}, {0, 128, 0, 255},
     {0, 0, 255, 255}, {75, 0, 130, 255},  {238, 130, 238, 255},
 };
-const Rgba kTreeEdge = {70, 130, 180, 255};  // steelblue (BRIDGES default)
-const Rgba kBackEdge = {0, 0, 0, 204};       // black, alpha 0.8
 
 // Shortest round-trip form; "10" -> "10.0" so the output looks like the client's.
 std::string num(double x) {
@@ -196,13 +194,15 @@ std::string bridges_json(const CrawlGraph& g, const BridgesMeta& meta) {
         const Link& l = links[k];
         if (k) out += ",";
         const int a = order[size_t(l.src)], b = order[size_t(l.dst)];
+        // Rainbow by the source's hops (spec #3); a back-link is bold in the same colour.
+        const Rgba& hop = kHop[std::clamp(g.nodes[size_t(a)].depth, 0, 6)];
         std::string look;
         if (!meta.pretty)
-            look = color(l.seen ? kBackEdge : kTreeEdge) + ",\"thickness\":" + num(l.seen ? 4.5 : 1.0);
+            look = color(hop, l.seen ? 0.6 : 0.9) + ",\"thickness\":" + num(l.seen ? 3.5 : 2.0);
         else if (!l.seen && hop_on[size_t(b)] > 0 && hop_on[size_t(a)] == hop_on[size_t(b)] - 1)  // rainbow highway
             look = color(kHop[std::min(hop_on[size_t(a)], 6)], 1.0) + ",\"thickness\":" + num(6.0);
         else if (l.seen)  // back-link: bold (spec #3)
-            look = color(kBackEdge, 0.45) + ",\"thickness\":" + num(3.0);
+            look = color(hop, 0.5) + ",\"thickness\":" + num(2.5);
         else
             look = color(kHop[std::clamp(g.nodes[size_t(b)].depth, 0, 6)], 0.8) + ",\"thickness\":" + num(1.5);
         out += "{\"color\":" + look + ",\"source\":\"" + std::to_string(l.src) + "\",\"target\":\"" +

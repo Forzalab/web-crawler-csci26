@@ -31,7 +31,7 @@ struct BridgesMeta {
 
 // Node:  color = ROYGBIV by depth (>= 6 stays violet), name = url ("\n" + title if known).
 //        rescued -> shape "diamond" + " · via fallback" in the hover text.
-// Link:  NEW edge -> steelblue, thickness 1.  SEEN edge (back-link) -> dark, thickness 4.5.
+// Link:  ROYGBIV by source depth. NEW edge alpha 0.9, thickness 2. SEEN (back-link) alpha 0.6, thickness 3.5.
 //        Self-loops and duplicate edges are dropped.
 // Pretty: site constellations: colour + shape by site rank (shapes diamond circle square triangle
 //        star cross, then wye), alpha 0.35 if unfetched; the root is a red star, size 60.
@@ -41,7 +41,7 @@ struct BridgesMeta {
 //        location: the layout scaled into +-500, with coord_system_type "window" and window
 //        [-550, 550, -550, 550], so BRIDGES pins the nodes instead of running its force layout.
 //        Links: rainbow highway (rainbow_path) thickness 6, red -> violet by hop. Other NEW links:
-//        target depth colour, alpha 0.8, thickness 1.5. SEEN: grey, alpha 0.3, thickness 0.5.
+//        target depth colour, alpha 0.8, thickness 1.5. SEEN: source depth colour, alpha 0.5, thickness 2.5.
 std::string bridges_json(const CrawlGraph& g, const BridgesMeta& meta = {});
 
 // Per node id: in-links (edges in, self-loops not counted).

@@ -99,14 +99,16 @@ static void test_pick_start() {
             return r;
         };
     };
-    CHECK_EQ(pick_start("espn.com", fail_with("tls: handshake", 0)), "http://espn.com");
+    CHECK_EQ(pick_start("espn.com", fail_with("tls: handshake", 0)), "http://espn.com/");
     CHECK_EQ(pick_start("espn.com/a", fail_with("dns: no such host", 0)), "http://espn.com/a");
-    CHECK_EQ(pick_start("espn.com", fail_with("http: 404", 404)), "https://espn.com");
-    CHECK_EQ(pick_start("espn.com", fail_with("", 200)), "https://espn.com");
+    CHECK_EQ(pick_start("espn.com", fail_with("http: 404", 404)), "https://espn.com/");
+    CHECK_EQ(pick_start("espn.com", fail_with("", 200)), "https://espn.com/");
     CHECK_EQ(calls, 4);
-    CHECK_EQ(pick_start("http://espn.com", fail_with("tls: x", 0)), "http://espn.com");
-    CHECK_EQ(pick_start("https://espn.com", fail_with("tls: x", 0)), "https://espn.com");
+    CHECK_EQ(pick_start("http://espn.com", fail_with("tls: x", 0)), "http://espn.com/");
+    CHECK_EQ(pick_start("https://espn.com", fail_with("tls: x", 0)), "https://espn.com/");
     CHECK_EQ(calls, 4);  // a typed scheme is never probed
+    CHECK_EQ(normalize_start("https://x.com"), "https://x.com/");  // root matches href="./"
+    CHECK_EQ(normalize_start("A"), "A");
 }
 
 static void test_resolve() {  // RFC 3986 §5.4.1 (fragments dropped on purpose)
