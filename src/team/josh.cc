@@ -1,4 +1,6 @@
-// josh.cc - spec #1 FALLBACK, written by Claude in Josh's slot (Josh's version never landed).
+// josh.cc - spec #1, written by Claude in Josh's slot. Josh's bcb2fbc (merged) fetched via our
+// wc::HttpClient, which spec #1 forbids (S6: networking must be boost tcp stream + readlib), so
+// his status / Content-Type checks live on below in this hand-rolled version.
 // Kerney's demo shape: boost tcp::iostream + readlib readline(), 10 s timeout, <=5 redirects,
 // chunked, HTML only. http:// only: https (or a redirect to it) -> ok false, RoutedFetcher
 // then asks our TLS fetcher. Built without Boost: always ok false. No globals (thread safe).
